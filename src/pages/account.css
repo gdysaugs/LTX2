@@ -1,0 +1,37 @@
+.account-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #eef4ff;
+  padding: 24px;
+}
+
+.account-card {
+  background: #ffffff;
+  padding: 24px;
+  border-radius: 20px;
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 12px;
+  min-width: 280px;
+}
+
+.primary {
+  border: none;
+  background: #1f5bff;
+  color: #ffffff;
+  padding: 12px 18px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: center;
+}
+
+.ghost {
+  border: 1px solid rgba(31, 91, 255, 0.3);
+  background: #ffffff;
+  color: #1f5bff;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
