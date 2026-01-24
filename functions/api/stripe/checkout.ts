@@ -63,9 +63,9 @@ const requireGoogleUser = async (request: Request, env: Env) => {
 }
 
 const PRICE_MAP = new Map([
-  ['price_1SsyiKPLWVPQ812Zo2YZLXXO', { label: 'ライト', tickets: 30 }],
-  ['price_1SsyjEPLWVPQ812Zw9JvJoto', { label: 'スタンダード', tickets: 80 }],
-  ['price_1SsyjVPLWVPQ812ZGPbtaFFw', { label: 'プロ', tickets: 200 }],
+  ['price_1St4C9AL4umhcfEPAVXlq2RJ', { label: 'ライト', tickets: 30 }],
+  ['price_1St4CaAL4umhcfEP3UzuJtTy', { label: 'スタンダード', tickets: 80 }],
+  ['price_1St4D7AL4umhcfEPY3qOc74l', { label: 'プロ', tickets: 200 }],
 ])
 
 const getRedirectUrl = (env: Env, request: Request, key: 'STRIPE_SUCCESS_URL' | 'STRIPE_CANCEL_URL', fallback: string) =>

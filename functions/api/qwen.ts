@@ -45,6 +45,8 @@ type NodeMap = Partial<{
   angle_strength: NodeMapValue
 }>
 
+const SIGNUP_TICKET_GRANT = 3
+
 const getWorkflowTemplate = async () => workflowTemplate as Record<string, unknown>
 
 const getNodeMap = async () => nodeMapTemplate as NodeMap
@@ -100,6 +102,80 @@ const makeUsageId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+const fetchTicketRow = async (
+  admin: ReturnType<typeof createClient>,
+  user: User,
+) => {
+  const email = user.email
+  const { data: byUser, error: userError } = await admin
+    .from('user_tickets')
+    .select('id, email, user_id, tickets')
+    .eq('user_id', user.id)
+    .maybeSingle()
+  if (userError) {
+    return { error: userError }
+  }
+  if (byUser) {
+    return { data: byUser, error: null }
+  }
+  if (!email) {
+    return { data: null, error: null }
+  }
+  const { data: byEmail, error: emailError } = await admin
+    .from('user_tickets')
+    .select('id, email, user_id, tickets')
+    .eq('email', email)
+    .maybeSingle()
+  if (emailError) {
+    return { error: emailError }
+  }
+  return { data: byEmail, error: null }
+}
+
+const ensureTicketRow = async (
+  admin: ReturnType<typeof createClient>,
+  user: User,
+) => {
+  const email = user.email
+  if (!email) {
+    return { data: null, error: null }
+  }
+
+  const { data: existing, error } = await fetchTicketRow(admin, user)
+  if (error) {
+    return { data: null, error }
+  }
+  if (existing) {
+    return { data: existing, error: null, created: false }
+  }
+
+  const { data: inserted, error: insertError } = await admin
+    .from('user_tickets')
+    .insert({ email, user_id: user.id, tickets: SIGNUP_TICKET_GRANT })
+    .select('id, email, user_id, tickets')
+    .maybeSingle()
+
+  if (insertError || !inserted) {
+    const { data: retry, error: retryError } = await fetchTicketRow(admin, user)
+    if (retryError) {
+      return { data: null, error: retryError }
+    }
+    return { data: retry, error: null, created: false }
+  }
+
+  const grantUsageId = makeUsageId()
+  await admin.from('ticket_events').insert({
+    usage_id: grantUsageId,
+    email,
+    user_id: user.id,
+    delta: SIGNUP_TICKET_GRANT,
+    reason: 'signup_bonus',
+    metadata: { source: 'auto_grant' },
+  })
+
+  return { data: inserted, error: null, created: true }
+}
+
 const ensureTicketAvailable = async (
   admin: ReturnType<typeof createClient>,
   user: User,
@@ -109,11 +185,7 @@ const ensureTicketAvailable = async (
     return { response: jsonResponse({ error: 'メールアドレスが取得できません。' }, 400) }
   }
 
-  const { data: existing, error } = await admin
-    .from('user_tickets')
-    .select('id, email, user_id, tickets')
-    .or(`user_id.eq.${user.id},email.eq.${email}`)
-    .maybeSingle()
+  const { data: existing, error } = await ensureTicketRow(admin, user)
 
   if (error) {
     return { response: jsonResponse({ error: error.message }, 500) }
@@ -161,11 +233,7 @@ const consumeTicket = async (
     }
   }
 
-  const { data: existing, error } = await admin
-    .from('user_tickets')
-    .select('id, email, user_id, tickets')
-    .or(`user_id.eq.${user.id},email.eq.${email}`)
-    .maybeSingle()
+  const { data: existing, error } = await ensureTicketRow(admin, user)
 
   if (error) {
     return { response: jsonResponse({ error: error.message }, 500) }

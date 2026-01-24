@@ -27,6 +27,7 @@ const FIXED_SECONDS = 5
 const FIXED_STEPS = 4
 const FIXED_CFG = 1
 const FIXED_FRAME_COUNT = FIXED_FPS * FIXED_SECONDS
+const VIDEO_TICKET_COST = 2
 const OAUTH_REDIRECT_URL =
   import.meta.env.VITE_SUPABASE_REDIRECT_URL ?? (typeof window !== 'undefined' ? window.location.origin : undefined)
 
@@ -489,7 +490,7 @@ export function Video() {
       setStatusMessage('チケット確認中…')
       return
     }
-    if (ticketCount !== null && ticketCount <= 0) {
+    if (ticketCount !== null && ticketCount < VIDEO_TICKET_COST) {
       setShowTicketModal(true)
       return
     }
@@ -661,8 +662,8 @@ export function Video() {
       {showTicketModal && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
-            <h3>チケットがありません</h3>
-            <p>生成にはチケットが必要です。購入ページへ移動しますか？</p>
+            <h3>チケットが不足しています</h3>
+            <p>動画生成にはチケットが2枚必要です。購入ページへ移動しますか？</p>
             <div className="modal-actions">
               <button type="button" className="ghost-button" onClick={() => setShowTicketModal(false)}>
                 閉じる

@@ -5,6 +5,8 @@ type Env = {
   SUPABASE_SERVICE_ROLE_KEY?: string
 }
 
+const SIGNUP_TICKET_GRANT = 3
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -62,6 +64,53 @@ const fetchTicketRow = async (
   return { data: byEmail, error: null }
 }
 
+const ensureTicketRow = async (
+  admin: ReturnType<typeof createClient>,
+  user: User,
+) => {
+  const email = user.email
+  if (!email) {
+    return { data: null, error: null }
+  }
+
+  const { data: existing, error } = await fetchTicketRow(admin, user)
+  if (error) {
+    return { data: null, error }
+  }
+  if (existing) {
+    return { data: existing, error: null, created: false }
+  }
+
+  const { data: inserted, error: insertError } = await admin
+    .from('user_tickets')
+    .insert({ email, user_id: user.id, tickets: SIGNUP_TICKET_GRANT })
+    .select('tickets')
+    .maybeSingle()
+
+  if (insertError || !inserted) {
+    const { data: retry, error: retryError } = await fetchTicketRow(admin, user)
+    if (retryError) {
+      return { data: null, error: retryError }
+    }
+    return { data: retry, error: null, created: false }
+  }
+
+  const usageId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  await admin.from('ticket_events').insert({
+    usage_id: usageId,
+    email,
+    user_id: user.id,
+    delta: SIGNUP_TICKET_GRANT,
+    reason: 'signup_bonus',
+    metadata: { source: 'auto_grant' },
+  })
+
+  return { data: inserted, error: null, created: true }
+}
+
 const isGoogleUser = (user: User) => {
   if (user.app_metadata?.provider === 'google') return true
   if (Array.isArray(user.identities)) {
@@ -102,7 +151,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return jsonResponse({ error: 'メールアドレスが取得できません。' }, 400)
   }
 
-  const { data, error } = await fetchTicketRow(auth.admin, auth.user)
+  const { data, error } = await ensureTicketRow(auth.admin, auth.user)
 
   if (error) {
     return jsonResponse({ error: error.message }, 500)
