@@ -27,9 +27,9 @@ export function Account() {
       <div className="account-page">
         <div className="account-card">
           <h1>アカウント</h1>
-          <p>ログインするとアカウント情報が表示されます。</p>
+          <p>ログインしてアカウントを表示してください。</p>
           <a className="primary" href="/">
-            チャットに戻る
+            アプリに戻る
           </a>
         </div>
       </div>
@@ -40,7 +40,7 @@ export function Account() {
     <div className="account-page">
       <div className="account-card">
         <h1>アカウント</h1>
-        <p>{session.user?.email || 'ログイン中のユーザー'}</p>
+        <p>{session.user?.email || 'ログイン中ユーザー'}</p>
         <button className="ghost" type="button" onClick={handleSignOut}>
           ログアウト
         </button>

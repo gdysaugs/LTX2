@@ -8,6 +8,30 @@ import './camera.css'
 const OAUTH_REDIRECT_URL =
   import.meta.env.VITE_SUPABASE_REDIRECT_URL ?? (typeof window !== 'undefined' ? window.location.origin : undefined)
 
+const formatRemaining = (targetIso: string | null) => {
+  if (!targetIso) return ''
+  const target = new Date(targetIso).getTime()
+  if (!Number.isFinite(target)) return ''
+  const diff = target - Date.now()
+  if (diff <= 0) return ''
+  const hours = Math.floor(diff / 3_600_000)
+  const minutes = Math.floor((diff % 3_600_000) / 60_000)
+  const seconds = Math.floor((diff % 60_000) / 1000)
+  return `${hours}時間${minutes.toString().padStart(2, '0')}分${seconds.toString().padStart(2, '0')}秒`
+}
+
+const normalizeErrorMessage = (value: unknown) => {
+  if (!value) return 'デイリーボーナスに失敗しました。'
+  if (typeof value === 'string') return value
+  if (value instanceof Error && value.message) return value.message
+  if (typeof value === 'object' && value) {
+    const maybe = value as { error?: unknown; message?: unknown; detail?: unknown }
+    const picked = maybe.error ?? maybe.message ?? maybe.detail
+    if (typeof picked === 'string' && picked) return picked
+  }
+  return 'デイリーボーナスに失敗しました。'
+}
+
 export function Purchase() {
   const [session, setSession] = useState<Session | null>(null)
   const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'error'>('idle')
@@ -17,6 +41,8 @@ export function Purchase() {
   const [ticketMessage, setTicketMessage] = useState('')
   const [purchaseStatus, setPurchaseStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [purchaseMessage, setPurchaseMessage] = useState('')
+  const [dailyClaimStatus, setDailyClaimStatus] = useState<string | null>(null)
+  const [isClaimingDaily, setIsClaimingDaily] = useState(false)
 
   const accessToken = session?.access_token ?? ''
 
@@ -61,7 +87,7 @@ export function Purchase() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       setTicketStatus('error')
-      setTicketMessage(data?.error || 'チケット情報の取得に失敗しました。')
+      setTicketMessage(data?.error || 'トークン取得に失敗しました。')
       setTicketCount(null)
       return
     }
@@ -83,7 +109,7 @@ export function Purchase() {
   const handleGoogleSignIn = async () => {
     if (!supabase || !isAuthConfigured) {
       setAuthStatus('error')
-      setAuthMessage('認証の設定が未完了です。')
+      setAuthMessage('認証設定が未完了です。')
       return
     }
     setAuthStatus('loading')
@@ -102,7 +128,7 @@ export function Purchase() {
       return
     }
     setAuthStatus('error')
-    setAuthMessage('認証URLを取得できませんでした。')
+    setAuthMessage('認証URLの取得に失敗しました。')
   }
 
   const handleSignOut = async () => {
@@ -118,11 +144,11 @@ export function Purchase() {
   const handleCheckout = async (priceId: string) => {
     if (!session || !accessToken) {
       setPurchaseStatus('error')
-      setPurchaseMessage('購入にはログインが必要です。')
+      setPurchaseMessage('購入するにはログインが必要です。')
       return
     }
     setPurchaseStatus('loading')
-    setPurchaseMessage('決済ページへ移動します…')
+    setPurchaseMessage('決済ページへ移動中...')
     const res = await fetch('/api/stripe/checkout', {
       method: 'POST',
       headers: {
@@ -134,27 +160,59 @@ export function Purchase() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok || !data?.url) {
       setPurchaseStatus('error')
-      setPurchaseMessage(data?.error || '決済ページの作成に失敗しました。')
+      setPurchaseMessage(data?.error || '決済作成に失敗しました。')
       return
     }
     window.location.assign(data.url)
   }
 
+  const handleClaimDaily = async () => {
+    if (!accessToken || !session) {
+      setDailyClaimStatus('ログインしてください。')
+      return
+    }
+    if (isClaimingDaily) return
+    setIsClaimingDaily(true)
+    setDailyClaimStatus(null)
+    try {
+      const res = await fetch('/api/daily-bonus', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const message = normalizeErrorMessage(data?.error ?? data?.message ?? data?.detail)
+        setDailyClaimStatus(message)
+        window.alert(message)
+        return
+      }
+      if (data?.granted) {
+        setDailyClaimStatus('無料トークンを付与しました。')
+        void fetchTickets(accessToken)
+      } else {
+        const reason = data?.reason
+        if (reason === 'cooldown' || reason === 'not_eligible_yet') {
+          const remain = formatRemaining(data?.next_eligible_at ?? null)
+          setDailyClaimStatus(remain ? `次の受け取りまで ${remain}` : 'まだ受け取れません。')
+        } else {
+          setDailyClaimStatus('まだ受け取れません。')
+        }
+      }
+    } catch (error) {
+      const message = normalizeErrorMessage(error)
+      setDailyClaimStatus(message)
+      window.alert(message)
+    } finally {
+      setIsClaimingDaily(false)
+    }
+  }
+
   return (
     <div className="camera-app purchase-app">
       <TopNav />
-      <header className="camera-hero">
-        <div>
-          <p className="camera-hero__eyebrow">YAJU AI</p>
-          <h1>チケット購入</h1>
-          <p className="camera-hero__lede">必要な枚数だけ、いつでも追加できます。</p>
-        </div>
-        <div className="camera-hero__badge">
-          <span>安全決済</span>
-          <strong>Stripe Checkout</strong>
-        </div>
-      </header>
-
       <div className="purchase-shell">
         <section className="purchase-panel">
           <div className="panel-header">
@@ -177,7 +235,7 @@ export function Purchase() {
                   onClick={handleGoogleSignIn}
                   disabled={authStatus === 'loading'}
                 >
-                  {authStatus === 'loading' ? '接続中…' : 'Googleで新規登録 / ログイン'}
+                  {authStatus === 'loading' ? '接続中...' : 'Googleで登録 / ログイン'}
                 </button>
               )}
             </div>
@@ -185,9 +243,20 @@ export function Purchase() {
           {authMessage && <div className="auth-message">{authMessage}</div>}
           {session && (
             <div className="ticket-message">
-              {ticketStatus === 'loading' && 'チケット確認中…'}
-              {ticketStatus !== 'loading' && `残りチケット: ${ticketCount ?? 0}`}
+              {ticketStatus === 'loading' && 'トークン確認中...'}
+              {ticketStatus !== 'loading' && `トークン残り: ${ticketCount ?? 0}`}
               {ticketStatus === 'error' && ticketMessage ? ` / ${ticketMessage}` : ''}
+            </div>
+          )}
+          {session && (
+            <div className="daily-bonus">
+              <div className="daily-bonus__row">
+                <strong>無料トークン</strong>
+                <button type="button" className="ghost-button" onClick={handleClaimDaily} disabled={isClaimingDaily}>
+                  {isClaimingDaily ? '受け取り中...' : '受け取る'}
+                </button>
+              </div>
+              {dailyClaimStatus && <span>{dailyClaimStatus}</span>}
             </div>
           )}
         </section>
@@ -195,8 +264,8 @@ export function Purchase() {
         <section className="purchase-panel">
           <div className="panel-header">
             <div className="panel-title">
-              <h2>プラン</h2>
-              <span>必要な分だけ購入できます。</span>
+              <h2>トークン購入</h2>
+              <span>必要な分だけ購入。</span>
             </div>
           </div>
           <div className="plan-grid">
@@ -204,7 +273,7 @@ export function Purchase() {
               <div key={plan.id} className="plan-card">
                 <div>
                   <div className="plan-label">{plan.label}</div>
-                  <div className="plan-tickets">{plan.tickets}枚</div>
+                  <div className="plan-tickets">{plan.tickets} トークン</div>
                 </div>
                 <div className="plan-price">¥{plan.price.toLocaleString()}</div>
                 <button

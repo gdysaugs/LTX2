@@ -28,7 +28,7 @@ const FIXED_SECONDS = 5
 const FIXED_STEPS = 4
 const FIXED_CFG = 1
 const FIXED_FRAME_COUNT = FIXED_FPS * FIXED_SECONDS
-const VIDEO_TICKET_COST = 2
+const VIDEO_TICKET_COST = 1
 const OAUTH_REDIRECT_URL =
   import.meta.env.VITE_SUPABASE_REDIRECT_URL ?? (typeof window !== 'undefined' ? window.location.origin : undefined)
 
@@ -114,6 +114,61 @@ const extractErrorMessage = (payload: any) =>
   payload?.result?.error ||
   payload?.output?.output?.error ||
   payload?.result?.output?.error
+
+const POLICY_BLOCK_MESSAGE =
+  'この画像には暴力的な表現、低年齢、または規約違反の可能性があります。別の画像でお試しください。'
+
+const normalizeErrorMessage = (value: unknown) => {
+  if (!value) return 'リクエストに失敗しました。'
+  if (typeof value === 'object') {
+    const maybe = value as { error?: unknown; message?: unknown; detail?: unknown }
+    const picked = maybe?.error ?? maybe?.message ?? maybe?.detail
+    if (typeof picked === 'string' && picked) return picked
+    if (value instanceof Error && value.message) return value.message
+  }
+  const raw = typeof value === 'string' ? value : value instanceof Error ? value.message : String(value)
+  const lowered = raw.toLowerCase()
+  if (
+    lowered.includes('underage') ||
+    lowered.includes('minor') ||
+    lowered.includes('child') ||
+    lowered.includes('age_range') ||
+    lowered.includes('age range') ||
+    lowered.includes('agerange') ||
+    lowered.includes('policy') ||
+    lowered.includes('moderation') ||
+    lowered.includes('violence') ||
+    lowered.includes('rekognition')
+  ) {
+    return POLICY_BLOCK_MESSAGE
+  }
+  const trimmed = raw.trim()
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      const message = parsed?.error || parsed?.message || parsed?.detail
+      if (typeof message === 'string' && message) return message
+    } catch {
+      // ignore parse errors
+    }
+  }
+  return raw
+}
+
+const isTicketShortage = (status: number, message: string) => {
+  if (status === 402) return true
+  const lowered = message.toLowerCase()
+  return (
+    lowered.includes('no tickets') ||
+    lowered.includes('no ticket') ||
+    lowered.includes('insufficient_tickets') ||
+    lowered.includes('insufficient tickets') ||
+    lowered.includes('token不足') ||
+    lowered.includes('トークン') ||
+    lowered.includes('token') ||
+    lowered.includes('credit')
+  )
+}
 
 const isFailureStatus = (status: string) => {
   const normalized = status.toLowerCase()
@@ -209,15 +264,16 @@ export function Video() {
   const [width, setWidth] = useState(832)
   const [height, setHeight] = useState(576)
   const [results, setResults] = useState<RenderResult[]>([])
-  const [statusMessage, setStatusMessage] = useState('画像をアップロードしてください。')
+  const [statusMessage, setStatusMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)
+  const [step, setStep] = useState(0)
   const [session, setSession] = useState<Session | null>(null)
-  const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'error'>('idle')
-  const [authMessage, setAuthMessage] = useState('')
+  const [authReady, setAuthReady] = useState(!supabase)
   const [ticketCount, setTicketCount] = useState<number | null>(null)
   const [ticketStatus, setTicketStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [ticketMessage, setTicketMessage] = useState('')
   const [showTicketModal, setShowTicketModal] = useState(false)
+  const [errorModalMessage, setErrorModalMessage] = useState<string | null>(null)
   const runIdRef = useRef(0)
   const navigate = useNavigate()
 
@@ -225,18 +281,33 @@ export function Video() {
   const completedCount = useMemo(() => results.filter((item) => item.video).length, [results])
   const progress = totalFrames ? completedCount / totalFrames : 0
   const displayVideo = results[0]?.video ?? null
-  const emptyMessage = sourcePayload ? '生成ボタンを押してください。' : '画像をアップロードしてください。'
+  const emptyMessage = sourcePayload ? '準備完了。' : '画像をアップロードしてください。'
   const accessToken = session?.access_token ?? ''
+  const totalSteps = 4
+  const stepTitles = ['画像アップロード', 'プロンプト入力', 'ネガティブ入力', '確認して生成'] as const
+  const stepDescriptions = [
+    '動画化する画像を選択します。',
+    '動きの指示を入力します。',
+    '任意: 避けたい内容を入力します。',
+    '利用規約に同意して内容を確認して生成します。',
+  ] as const
+  const canAdvanceImage = Boolean(sourcePayload)
+  const canAdvancePrompt = prompt.trim().length > 0
 
   useEffect(() => {
-    if (!supabase) return
-    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
+    if (!supabase) {
+      setAuthReady(true)
+      return
+    }
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session ?? null)
+      setAuthReady(true)
+    })
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
-      setAuthStatus('idle')
-      setAuthMessage('')
+      setAuthReady(true)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -248,8 +319,7 @@ export function Video() {
     if (!hasCode || !hasState) return
     supabase.auth.exchangeCodeForSession(window.location.href).then(({ error }) => {
       if (error) {
-        setAuthStatus('error')
-        setAuthMessage(error.message)
+        window.alert(error.message)
         return
       }
       const url = new URL(window.location.href)
@@ -270,13 +340,15 @@ export function Video() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setTicketStatus('error')
-        setTicketMessage(data?.error || 'チケット情報の取得に失敗しました。')
+        setTicketMessage(data?.error || 'トークン取得に失敗しました。')
         setTicketCount(null)
-        return
+        return null
       }
+      const nextCount = Number(data?.tickets ?? 0)
       setTicketStatus('idle')
       setTicketMessage('')
-      setTicketCount(Number(data?.tickets ?? 0))
+      setTicketCount(nextCount)
+      return nextCount
     },
     [],
   )
@@ -290,12 +362,6 @@ export function Video() {
     }
     void fetchTickets(accessToken)
   }, [accessToken, fetchTickets, session])
-
-  useEffect(() => {
-    if (session && sourcePayload && statusMessage.includes('ログイン')) {
-      setStatusMessage('生成準備OK')
-    }
-  }, [session, sourcePayload, statusMessage])
 
   useEffect(() => {
     if (!session && sourcePayload && !isRunning) {
@@ -326,9 +392,9 @@ export function Video() {
 
   const submitVideo = useCallback(
     async (payload: string, token: string) => {
-      if (!payload) throw new Error('画像がありません。')
+      if (!payload) throw new Error('画像が指定されていません。')
       const input: Record<string, unknown> = {
-        image_base64: payload,
+        mode: 'i2v',
         prompt,
         negative_prompt: negativePrompt,
         width,
@@ -343,6 +409,7 @@ export function Video() {
         randomize_seed: true,
         worker_mode: 'comfyui',
       }
+      input.image_base64 = payload
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (token) {
         headers.Authorization = `Bearer ${token}`
@@ -354,7 +421,14 @@ export function Video() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const message = data?.error || data?.message || '生成に失敗しました。'
+        const rawMessage = data?.error || data?.message || data?.detail || '生成に失敗しました。'
+        const message = normalizeErrorMessage(rawMessage)
+        if (isTicketShortage(res.status, message)) {
+          setShowTicketModal(true)
+          setStatusMessage('トークン不足')
+          throw new Error('TICKET_SHORTAGE')
+        }
+        setErrorModalMessage(message)
         throw new Error(message)
       }
       const nextTickets = Number(data?.ticketsLeft ?? data?.tickets_left)
@@ -366,7 +440,7 @@ export function Video() {
         return { videos }
       }
       const jobId = extractJobId(data)
-      if (!jobId) throw new Error('ジョブIDが取得できませんでした。')
+      if (!jobId) throw new Error('ジョブID取得に失敗しました。')
       return { jobId }
     },
     [height, negativePrompt, prompt, width],
@@ -382,7 +456,14 @@ export function Video() {
       const res = await fetch(`${API_ENDPOINT}?id=${encodeURIComponent(jobId)}`, { headers })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const message = data?.error || data?.message || 'ステータス取得に失敗しました。'
+        const rawMessage = data?.error || data?.message || data?.detail || '状態取得に失敗しました。'
+        const message = normalizeErrorMessage(rawMessage)
+        if (isTicketShortage(res.status, message)) {
+          setShowTicketModal(true)
+          setStatusMessage('トークン不足')
+          throw new Error('TICKET_SHORTAGE')
+        }
+        setErrorModalMessage(message)
         throw new Error(message)
       }
       const nextTickets = Number(data?.ticketsLeft ?? data?.tickets_left)
@@ -391,8 +472,16 @@ export function Video() {
       }
       const status = String(data?.status || data?.state || '').toLowerCase()
       const statusError = extractErrorMessage(data)
+      if (statusError) {
+        const normalized = normalizeErrorMessage(statusError)
+        if (isTicketShortage(res.status, normalized)) {
+          setShowTicketModal(true)
+          setStatusMessage('トークン不足')
+          throw new Error('TICKET_SHORTAGE')
+        }
+      }
       if (statusError || isFailureStatus(status)) {
-        throw new Error(statusError || '生成に失敗しました。')
+        throw new Error(normalizeErrorMessage(statusError || '生成に失敗しました。'))
       }
       const videos = extractVideoList(data)
       if (videos.length) {
@@ -405,15 +494,15 @@ export function Video() {
 
   const startBatch = useCallback(
     async (payload: string) => {
-      if (!payload) return
-      if (!session) {
-        setStatusMessage('Googleでログインしてください。')
-        return
-      }
+    if (!payload) return
+    if (!session) {
+      setStatusMessage('Googleでログインしてください。')
+      return
+    }
       const runId = runIdRef.current + 1
       runIdRef.current = runId
       setIsRunning(true)
-      setStatusMessage('生成中… 約1分で完了予定')
+      setStatusMessage('')
       setResults([{ id: makeId(), status: 'queued' as const }])
 
       try {
@@ -440,28 +529,39 @@ export function Video() {
             }
           } catch (error) {
             if (runIdRef.current !== runId) return
-            const message = error instanceof Error ? error.message : 'リクエストに失敗しました。'
+            const message = normalizeErrorMessage(error instanceof Error ? error.message : error)
+            if (message === 'TICKET_SHORTAGE') {
+              setResults((prev) =>
+                prev.map((item, itemIndex) =>
+                  itemIndex === 0 ? { ...item, status: 'error' as const, error: 'トークン不足' } : item,
+                ),
+              )
+              setStatusMessage('トークン不足')
+              return
+            }
             setResults((prev) =>
               prev.map((item, itemIndex) =>
                 itemIndex === 0 ? { ...item, status: 'error' as const, error: message } : item,
               ),
             )
             setStatusMessage(message)
+            setErrorModalMessage(message)
           }
-        }]
+      }]
 
         await runQueue(tasks, MAX_PARALLEL)
         if (runIdRef.current === runId) {
-          setStatusMessage('生成完了')
+          setStatusMessage('完了')
           if (accessToken) {
             void fetchTickets(accessToken)
           }
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '生成に失敗しました。'
-        setStatusMessage(message)
-        setResults((prev) => prev.map((item) => ({ ...item, status: 'error', error: message })))
-      } finally {
+    } catch (error) {
+      const message = normalizeErrorMessage(error instanceof Error ? error.message : error)
+      setStatusMessage(message)
+      setResults((prev) => prev.map((item) => ({ ...item, status: 'error', error: message })))
+      setErrorModalMessage(message)
+    } finally {
         if (runIdRef.current === runId) {
           setIsRunning(false)
         }
@@ -472,43 +572,29 @@ export function Video() {
 
   const handleGoogleSignIn = async () => {
     if (!supabase || !isAuthConfigured) {
-      setAuthStatus('error')
-      setAuthMessage('認証の設定が未完了です。')
+      window.alert('認証設定が未完了です。')
       return
     }
-    setAuthStatus('loading')
-    setAuthMessage('')
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: OAUTH_REDIRECT_URL, skipBrowserRedirect: true },
     })
     if (error) {
-      setAuthStatus('error')
-      setAuthMessage(error.message)
+      window.alert(error.message)
       return
     }
     if (data?.url) {
       window.location.assign(data.url)
       return
     }
-    setAuthStatus('error')
-    setAuthMessage('認証URLを取得できませんでした。')
-  }
-
-  const handleSignOut = async () => {
-    if (!supabase) return
-    try {
-      await supabase.auth.signOut({ scope: 'local' })
-    } catch (error) {
-      setAuthStatus('error')
-      setAuthMessage(error instanceof Error ? error.message : 'ログアウトに失敗しました。')
-    }
+    window.alert('認証URLの取得に失敗しました。')
   }
 
   const clearImage = useCallback(() => {
     setSourcePreview(null)
     setSourcePayload(null)
     setSourceName('')
+    setStep(0)
   }, [])
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -535,20 +621,44 @@ export function Video() {
   }
 
   const handleGenerate = async () => {
-    if (!sourcePayload || isRunning) return
+    if (isRunning) return
+    if (!sourcePayload) return
     if (!session) {
       setStatusMessage('Googleでログインしてください。')
       return
     }
     if (ticketStatus === 'loading') {
-      setStatusMessage('チケット確認中…')
+      setStatusMessage('トークン確認中...')
       return
     }
-    if (ticketCount !== null && ticketCount < VIDEO_TICKET_COST) {
+    if (accessToken) {
+      setStatusMessage('トークン確認中...')
+      const latestCount = await fetchTickets(accessToken)
+      if (latestCount !== null && latestCount < VIDEO_TICKET_COST) {
+        setShowTicketModal(true)
+        return
+      }
+    } else if (ticketCount === null) {
+      setStatusMessage('トークン確認中...')
+      return
+    } else if (ticketCount < VIDEO_TICKET_COST) {
       setShowTicketModal(true)
       return
     }
     await startBatch(sourcePayload)
+  }
+
+  const handleNext = () => {
+    setStep((prev) => Math.min(prev + 1, totalSteps - 1))
+  }
+
+  const handleBack = () => {
+    setStep((prev) => Math.max(prev - 1, 0))
+  }
+
+  const handleSkipNegative = () => {
+    setNegativePrompt('')
+    setStep(totalSteps - 1)
   }
 
   const isGif = displayVideo?.startsWith('data:image/gif')
@@ -595,6 +705,15 @@ export function Video() {
     }
   }, [displayVideo, isGif, sourceName])
 
+  if (!authReady) {
+    return (
+      <div className="camera-app">
+        <TopNav />
+        <div className="auth-boot" />
+      </div>
+    )
+  }
+
   if (!session) {
     return (
       <div className="camera-app">
@@ -607,152 +726,185 @@ export function Video() {
   return (
     <div className="camera-app">
       <TopNav />
-      <header className="camera-hero">
-        <div>
-          <p className="camera-hero__eyebrow">YAJU AI</p>
-          <h1>YAJU AI Video</h1>
-          <p className="camera-hero__lede">静止画から短い動画を生成します。</p>
-        </div>
-        <div className="camera-hero__badge">
-          <span>高速AI生成</span>
-          <strong>どんな画像も動画に</strong>
-        </div>
-      </header>
-
-      <div className="camera-shell">
-        <section className="camera-panel">
-          <div className="panel-header">
-            <div className="panel-title">
-              <h2>入力</h2>
-              <span>{statusMessage}</span>
-            </div>
-            <div className="panel-auth">
-              {session ? (
-                <div className="auth-status">
-                  <span className="auth-email">{session.user?.email ?? 'ログイン中'}</span>
-                  <button type="button" className="ghost-button" onClick={handleSignOut}>
-                    ログアウト
-                  </button>
+      <div className="wizard-shell">
+        <section className="wizard-panel wizard-panel--inputs">
+          <div className="wizard-card wizard-card--step">
+            <div className="wizard-stepper">
+              <div className="wizard-stepper__meta">
+                <span>{`ステップ ${step + 1} / ${totalSteps}`}</span>
+                <div className="wizard-dots">
+                  {Array.from({ length: totalSteps }).map((_, index) => (
+                    <span
+                      key={`i2v-step-${index}`}
+                      className={`wizard-dot${index <= step ? ' is-active' : ''}`}
+                    />
+                  ))}
                 </div>
-              ) : (
+              </div>
+              <div className="wizard-status">
+                {ticketStatus === 'loading' && 'トークン確認中...'}
+                {ticketStatus !== 'loading' && `トークン残り: ${ticketCount ?? 0}`}
+                {ticketStatus === 'error' && ticketMessage ? ` / ${ticketMessage}` : ''}
+              </div>
+              <h2>{stepTitles[step]}</h2>
+              <p>{stepDescriptions[step]}</p>
+            </div>
+
+            {step === 0 && (
+              <div className="wizard-section">
+                <label className="upload-box">
+                  <input type="file" accept="image/*" onChange={handleFileChange} />
+                  <div>
+                    <strong>{sourceName || '画像アップロード'}</strong>
+                    <span>動画化する画像を選択してください。</span>
+                  </div>
+                </label>
+                {sourcePreview && (
+                  <div className="preview-card">
+                    <button
+                      type="button"
+                      className="preview-card__remove"
+                      onClick={clearImage}
+                      aria-label="Remove image"
+                    >
+                      x
+                    </button>
+                    <img src={sourcePreview} alt="入力プレビュー" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {step === 1 && (
+              <label className="wizard-field">
+                <span>プロンプト</span>
+                <textarea
+                  rows={4}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="動きや雰囲気を入力してください。"
+                />
+              </label>
+            )}
+
+            {step === 2 && (
+              <label className="wizard-field">
+                <span>ネガティブプロンプト</span>
+                <textarea
+                  rows={3}
+                  value={negativePrompt}
+                  onChange={(e) => setNegativePrompt(e.target.value)}
+                  placeholder="任意: 避けたい内容を入力。"
+                />
+              </label>
+            )}
+
+            {step === 3 && (
+              <div className="wizard-summary">
+                <div>
+                  <p>プロンプト</p>
+                  <strong>{prompt || '—'}</strong>
+                </div>
+                <div>
+                  <p>ネガティブプロンプト</p>
+                  <strong>{negativePrompt || 'なし'}</strong>
+                </div>
+              </div>
+            )}
+
+            <div className="wizard-actions">
+              {step > 0 && (
+                <button type="button" className="ghost-button" onClick={handleBack}>
+                  戻る
+                </button>
+              )}
+              {step === 0 && (
+                <button type="button" className="primary-button" onClick={handleNext} disabled={!canAdvanceImage}>
+                  次へ
+                </button>
+              )}
+              {step === 1 && (
+                <button type="button" className="primary-button" onClick={handleNext} disabled={!canAdvancePrompt}>
+                  次へ
+                </button>
+              )}
+              {step === 2 && (
+                <button type="button" className="primary-button" onClick={handleNext}>
+                  次へ
+                </button>
+              )}
+              {step === 3 && (
                 <button
                   type="button"
-                  className="ghost-button"
-                  onClick={handleGoogleSignIn}
-                  disabled={authStatus === 'loading'}
+                  className="primary-button"
+                  onClick={handleGenerate}
+                  disabled={!sourcePayload || isRunning || !session}
                 >
-                  {authStatus === 'loading' ? '接続中…' : 'Googleで新規登録 / ログイン'}
+                  {isRunning ? '生成中...' : '動画を生成'}
                 </button>
               )}
             </div>
           </div>
-          {authMessage && <div className="auth-message">{authMessage}</div>}
-          {session && (
-            <div className="ticket-message">
-              {ticketStatus === 'loading' && 'チケット確認中…'}
-              {ticketStatus !== 'loading' && `残りチケット: ${ticketCount ?? 0}`}
-              {ticketStatus === 'error' && ticketMessage ? ` / ${ticketMessage}` : ''}
-            </div>
-          )}
-          <label className="upload-box">
-            <input type="file" accept="image/*" onChange={handleFileChange} />
-            <div>
-              <strong>{sourceName || '画像をアップロード'}</strong>
-              <span>動画化したい元画像を選択してください。</span>
-            </div>
-          </label>
-          {sourcePreview && (
-            <div className="preview-card">
-              <button
-                type="button"
-                className="preview-card__remove"
-                onClick={clearImage}
-                aria-label="Remove image"
-              >
-                x
-              </button>
-              <img src={sourcePreview} alt="入力プレビュー" />
-            </div>
-          )}
-
-          <div className="settings-block">
-            <h3>設定</h3>
-            <label>
-              <span>プロンプト</span>
-              <input value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-            </label>
-            <label>
-              <span>ネガティブプロンプト</span>
-              <input value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} />
-            </label>
-          </div>
-
-          <button
-            type="button"
-            className="primary-button"
-            onClick={handleGenerate}
-            disabled={!sourcePayload || isRunning || !session}
-          >
-            {isRunning ? '生成中…' : '動画生成'}
-          </button>
         </section>
 
-        <section className="camera-stage">
-          <div className="stage-header">
-            <div>
-              <h2>プレビュー</h2>
-              <p>生成された動画を表示します。</p>
-            </div>
-            {canDownload && (
-              <div className="stage-actions">
+        <section className="wizard-panel wizard-panel--preview">
+          <div className="wizard-card wizard-card--preview">
+            <div className="wizard-card__header">
+              <div>
+                <p className="wizard-eyebrow">プレビュー</p>
+                {statusMessage && !isRunning && <span>{statusMessage}</span>}
+              </div>
+              {canDownload && (
                 <button type="button" className="ghost-button" onClick={handleDownload}>
-                  保存
+                  ダウンロード
                 </button>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          <div className="stage-viewer" style={viewerStyle}>
-            <div className="viewer-progress" aria-hidden="true" />
-            {displayVideo ? (
-              isGif ? (
-                <img src={displayVideo} alt="生成結果" />
-              ) : (
-                <video controls src={displayVideo} />
-              )
-            ) : (
-              <div className="stage-placeholder">{emptyMessage}</div>
-            )}
-            {isRunning && (
-              <div className="loading-overlay" role="status" aria-live="polite">
-                <div className="loading-card">
-                  <span className="loading-spinner" aria-hidden="true" />
-                  <div>
-                    <strong>生成中</strong>
-                    <p>約1分で完了予定</p>
-                  </div>
+            <div className="stage-viewer" style={viewerStyle}>
+              <div className="viewer-progress" aria-hidden="true" />
+              {isRunning ? (
+                <div className="loading-display" role="status" aria-live="polite">
+                  <div className="loading-orb" aria-hidden="true" />
+                  <span className="loading-blink">生成中...</span>
+                  <p>まもなく完了します。</p>
                 </div>
-              </div>
-            )}
-            {isRunning && (
-              <div className="viewer-hud">
-                <span>{`生成中 ${completedCount}/${totalFrames}`}</span>
-              </div>
-            )}
+              ) : displayVideo ? (
+                isGif ? (
+                  <img src={displayVideo} alt="結果" />
+                ) : (
+                  <video controls src={displayVideo} />
+                )
+              ) : (
+                <div className="stage-placeholder">{emptyMessage}</div>
+              )}
+            </div>
           </div>
         </section>
-      </div>
-      {showTicketModal && (
+      </div>{showTicketModal && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
-            <h3>チケットが不足しています</h3>
-            <p>動画生成にはチケットが2枚必要です。購入ページへ移動しますか？</p>
+            <h3>トークン不足</h3>
+            <p>動画生成は1トークンです。購入ページへ移動しますか？</p>
             <div className="modal-actions">
               <button type="button" className="ghost-button" onClick={() => setShowTicketModal(false)}>
                 閉じる
               </button>
               <button type="button" className="primary-button" onClick={() => navigate('/purchase')}>
-                チケット購入へ
+                トークン購入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {errorModalMessage && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <h3>リクエストが拒否されました</h3>
+            <p>{errorModalMessage}</p>
+            <div className="modal-actions">
+              <button type="button" className="primary-button" onClick={() => setErrorModalMessage(null)}>
+                閉じる
               </button>
             </div>
           </div>
@@ -761,3 +913,7 @@ export function Video() {
     </div>
   )
 }
+
+
+
+

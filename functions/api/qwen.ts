@@ -1,13 +1,17 @@
-﻿import workflowTemplate from './qwen-workflow.json'
+import workflowTemplate from './qwen-workflow.json'
 import nodeMapTemplate from './qwen-node-map.json'
 import { createClient, type User } from '@supabase/supabase-js'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
+import { isUnderageImage } from '../_shared/rekognition'
 
 type Env = {
   RUNPOD_API_KEY: string
   RUNPOD_ENDPOINT_URL?: string
   COMFY_ORG_API_KEY?: string
   RUNPOD_WORKER_MODE?: string
+  AWS_ACCESS_KEY_ID?: string
+  AWS_SECRET_ACCESS_KEY?: string
+  AWS_REGION?: string
   SUPABASE_URL?: string
   SUPABASE_SERVICE_ROLE_KEY?: string
 }
@@ -53,7 +57,8 @@ const MIN_GUIDANCE = 0
 const MAX_GUIDANCE = 10
 const MIN_ANGLE_STRENGTH = 0
 const MAX_ANGLE_STRENGTH = 1
-
+const UNDERAGE_BLOCK_MESSAGE =
+  'この画像には暴力的な表現、低年齢、または規約違反の可能性があります。別の画像でお試しください。'
 const getWorkflowTemplate = async () => workflowTemplate as Record<string, unknown>
 
 const getNodeMap = async () => nodeMapTemplate as NodeMap
@@ -90,14 +95,20 @@ const requireGoogleUser = async (request: Request, env: Env, corsHeaders: Header
   }
   const admin = getSupabaseAdmin(env)
   if (!admin) {
-    return { response: jsonResponse({ error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set.' }, 500, corsHeaders) }
+    return {
+      response: jsonResponse(
+        { error: 'SUPABASE_URL または SUPABASE_SERVICE_ROLE_KEY が設定されていません。' },
+        500,
+        corsHeaders,
+      ),
+    }
   }
   const { data, error } = await admin.auth.getUser(token)
   if (error || !data?.user) {
     return { response: jsonResponse({ error: '認証に失敗しました。' }, 401, corsHeaders) }
   }
   if (!isGoogleUser(data.user)) {
-    return { response: jsonResponse({ error: 'Googleログインのみ利用できます。' }, 403, corsHeaders) }
+    return { response: jsonResponse({ error: 'Googleログインのみ対応しています。' }, 403, corsHeaders) }
   }
   return { admin, user: data.user }
 }
@@ -200,7 +211,7 @@ const ensureTicketAvailable = async (
   }
 
   if (!existing) {
-    return { response: jsonResponse({ error: 'チケットがありません。' }, 402, corsHeaders) }
+    return { response: jsonResponse({ error: 'トークンが不足しています。' }, 402, corsHeaders) }
   }
 
   if (!existing.user_id) {
@@ -208,7 +219,7 @@ const ensureTicketAvailable = async (
   }
 
   if (existing.tickets < 1) {
-    return { response: jsonResponse({ error: 'チケットがありません。' }, 402, corsHeaders) }
+    return { response: jsonResponse({ error: 'トークンが不足しています。' }, 402, corsHeaders) }
   }
 
   return { existing }
@@ -233,7 +244,7 @@ const consumeTicket = async (
   }
 
   if (!existing) {
-    return { response: jsonResponse({ error: 'チケットがありません。' }, 402, corsHeaders) }
+    return { response: jsonResponse({ error: 'トークンが不足しています。' }, 402, corsHeaders) }
   }
 
   if (!existing.user_id) {
@@ -241,7 +252,7 @@ const consumeTicket = async (
   }
 
   if (existing.tickets < 1) {
-    return { response: jsonResponse({ error: 'チケットがありません。' }, 402, corsHeaders) }
+    return { response: jsonResponse({ error: 'トークンが不足しています。' }, 402, corsHeaders) }
   }
 
   const resolvedUsageId = usageId ?? makeUsageId()
@@ -254,12 +265,12 @@ const consumeTicket = async (
   })
 
   if (rpcError) {
-    const message = rpcError.message ?? 'チケット消費に失敗しました。'
+    const message = rpcError.message ?? 'トークン消費に失敗しました。'
     if (message.includes('INSUFFICIENT_TICKETS')) {
-      return { response: jsonResponse({ error: 'チケットがありません。' }, 402, corsHeaders) }
+      return { response: jsonResponse({ error: 'トークンが不足しています。' }, 402, corsHeaders) }
     }
     if (message.includes('INVALID')) {
-      return { response: jsonResponse({ error: '不正なチケット操作です。' }, 400, corsHeaders) }
+      return { response: jsonResponse({ error: '不正なトークン操作です。' }, 400, corsHeaders) }
     }
     return { response: jsonResponse({ error: message }, 500, corsHeaders) }
   }
@@ -321,7 +332,7 @@ const refundTicket = async (
   }
 
   if (!existing) {
-    return { response: jsonResponse({ error: 'チケットがありません。' }, 402, corsHeaders) }
+    return { response: jsonResponse({ error: 'トークンが不足しています。' }, 402, corsHeaders) }
   }
 
   if (!existing.user_id) {
@@ -337,7 +348,7 @@ const refundTicket = async (
   })
 
   if (rpcError) {
-    const message = rpcError.message ?? 'チケット払い戻しに失敗しました。'
+    const message = rpcError.message ?? 'トークン払い戻しに失敗しました。'
     if (message.includes('INVALID')) {
       return { response: jsonResponse({ error: message }, 400, corsHeaders) }
     }
@@ -523,10 +534,10 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const id = url.searchParams.get('id')
   const usageId = url.searchParams.get('usage_id') ?? url.searchParams.get('usageId') ?? ''
   if (!id) {
-    return jsonResponse({ error: 'id is required.' }, 400, corsHeaders)
+    return jsonResponse({ error: 'idが必要です。' }, 400, corsHeaders)
   }
   if (!usageId) {
-    return jsonResponse({ error: 'usage_id is required.' }, 400, corsHeaders)
+    return jsonResponse({ error: 'usage_idが必要です。' }, 400, corsHeaders)
   }
   if (!env.RUNPOD_API_KEY) {
     return jsonResponse({ error: 'RUNPOD_API_KEY is not set.' }, 500, corsHeaders)
@@ -617,14 +628,34 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       'sub_image',
     )
   } catch (error) {
-    return jsonResponse({ error: error instanceof Error ? error.message : 'Failed to read image.' }, 400, corsHeaders)
+    return jsonResponse({ error: error instanceof Error ? error.message : '画像の読み取りに失敗しました。' }, 400, corsHeaders)
   }
 
   if (!imageBase64) {
-    return jsonResponse({ error: 'image is required.' }, 400, corsHeaders)
+    return jsonResponse({ error: '画像が必要です。' }, 400, corsHeaders)
   }
 
   const subImageBase64 = subImageBase64Raw || imageBase64
+
+  try {
+    if (await isUnderageImage(imageBase64, env)) {
+      return jsonResponse({ error: UNDERAGE_BLOCK_MESSAGE }, 400, corsHeaders)
+    }
+    if (
+      subImageBase64Raw &&
+      subImageBase64 &&
+      subImageBase64 !== imageBase64 &&
+      (await isUnderageImage(subImageBase64, env))
+    ) {
+      return jsonResponse({ error: UNDERAGE_BLOCK_MESSAGE }, 400, corsHeaders)
+    }
+  } catch (error) {
+    return jsonResponse(
+      { error: error instanceof Error ? error.message : 'Age verification failed.' },
+      500,
+      corsHeaders,
+    )
+  }
 
   const prompt = String(input?.prompt ?? input?.text ?? '')
   const negativePrompt = String(input?.negative_prompt ?? input?.negative ?? '')
@@ -888,3 +919,4 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   }
   return jsonResponse(upstreamPayload, upstream.status, corsHeaders)
 }
+

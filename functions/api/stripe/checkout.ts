@@ -60,9 +60,10 @@ const requireGoogleUser = async (request: Request, env: Env, corsHeaders: Header
 }
 
 const PRICE_MAP = new Map([
-  ['price_1St4C9AL4umhcfEPAVXlq2RJ', { label: 'ライト', tickets: 30 }],
-  ['price_1St4CaAL4umhcfEP3UzuJtTy', { label: 'スタンダード', tickets: 80 }],
-  ['price_1St4D7AL4umhcfEPY3qOc74l', { label: 'プロ', tickets: 200 }],
+  ['price_1Sy5N6Abw0uHQjne0Q6aV0M1', { label: 'Starter', tickets: 20 }],
+  ['price_1Sy5QbAbw0uHQjne0wydR1AG', { label: 'Basic', tickets: 80 }],
+  ['price_1Sy5QqAbw0uHQjneTnEIOCFx', { label: 'Plus', tickets: 200 }],
+  ['price_1Sy5R3Abw0uHQjnekmxX7Q5n', { label: 'Pro', tickets: 500 }],
 ])
 
 const getRedirectUrl = (env: Env, request: Request, key: 'STRIPE_SUCCESS_URL' | 'STRIPE_CANCEL_URL', fallback: string) =>
@@ -122,6 +123,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   params.set('metadata[tickets]', String(plan.tickets))
   params.set('metadata[price_id]', priceId)
   params.set('metadata[plan_label]', plan.label)
+  params.set('metadata[app]', 'animone')
+  params.set('payment_intent_data[statement_descriptor]', 'ANIMONE')
 
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',

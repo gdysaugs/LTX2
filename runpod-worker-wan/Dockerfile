@@ -45,24 +45,13 @@ RUN git clone https://github.com/kijai/ComfyUI-WanVideoWrapper /comfyui/custom_n
          uv pip install -r /comfyui/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt; \
        fi
 
-RUN mkdir -p /comfyui/models/diffusion_models /comfyui/models/loras /comfyui/models/text_encoders /comfyui/models/vae
+RUN git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite /comfyui/custom_nodes/ComfyUI-VideoHelperSuite \
+    && uv pip install -r /comfyui/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt
 
-COPY models/unet/wan2.2_i2v_high_noise_14B_Q4_K_M.gguf /comfyui/models/diffusion_models/
-COPY models/unet/wan2.2_i2v_low_noise_14B_Q4_K_M.gguf /comfyui/models/diffusion_models/
-COPY models/loras/Wan2.2-Lightning_I2V-A14B-4steps-lora_HIGH_fp16.safetensors /comfyui/models/loras/
-COPY models/loras/Wan2.2-Lightning_I2V-A14B-4steps-lora_LOW_fp16.safetensors /comfyui/models/loras/
-COPY ["models/loras/NSFW-22-H-e8 (1).safetensors", "/comfyui/models/loras/"]
-COPY models/loras/WAN-2.2-I2V-BreastPlay-HIGH-v2.safetensors /comfyui/models/loras/
-COPY models/loras/reverse_suspended_congress_I2V_high.safetensors /comfyui/models/loras/
-COPY models/loras/wan22_i2v_anal_v1_high_noise.safetensors /comfyui/models/loras/
-COPY models/loras/wan22.r3v3rs3_c0wg1rl-14b-High-i2v_e70.safetensors /comfyui/models/loras/
-COPY models/loras/wan22-ultimatedeepthroat-i2v-102epoc-high-k3nk.safetensors /comfyui/models/loras/
-COPY models/loras/wan2.2_i2v_highnoise_pov_missionary_v1.0.safetensors /comfyui/models/loras/
-COPY ["models/loras/st0m4chBulg3_FUSED_HN (1).safetensors", "/comfyui/models/loras/"]
-COPY models/loras/wan2.2-i2v-high-pov-insertion-v1.0.safetensors /comfyui/models/loras/
-COPY models/loras/wan2.2-i2v-low-pov-insertion-v1.0.safetensors /comfyui/models/loras/
-COPY models/loras/Sensual_fingering_v1_low_noise.safetensors /comfyui/models/loras/
-COPY models/text_encoders/umt5-xxl-enc-bf16.safetensors /comfyui/models/text_encoders/
+RUN mkdir -p /comfyui/models/diffusion_models /comfyui/models/text_encoders /comfyui/models/vae
+
+COPY models/unet/wan2.2-rapid-mega-aio-nsfw-v12.1-Q8_0.gguf /comfyui/models/diffusion_models/
+COPY models/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors /comfyui/models/text_encoders/
 COPY models/vae/wan_2.1_vae.safetensors /comfyui/models/vae/
 
 WORKDIR /

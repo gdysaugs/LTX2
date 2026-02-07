@@ -1,13 +1,19 @@
-import workflowTemplate from './wan-workflow.json'
-import nodeMapTemplate from './wan-node-map.json'
+import workflowI2VTemplate from './wan-workflow-i2v.json'
+import workflowT2VTemplate from './wan-workflow-t2v.json'
+import nodeMapI2VTemplate from './wan-node-map-i2v.json'
+import nodeMapT2VTemplate from './wan-node-map-t2v.json'
 import { createClient, type User } from '@supabase/supabase-js'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
+import { isUnderageImage } from '../_shared/rekognition'
 
 type Env = {
   RUNPOD_API_KEY: string
   RUNPOD_ENDPOINT_URL?: string
   RUNPOD_WAN_ENDPOINT_URL?: string
   COMFY_ORG_API_KEY?: string
+  AWS_ACCESS_KEY_ID?: string
+  AWS_SECRET_ACCESS_KEY?: string
+  AWS_REGION?: string
   SUPABASE_URL?: string
   SUPABASE_SERVICE_ROLE_KEY?: string
 }
@@ -46,7 +52,7 @@ type NodeMap = Partial<{
 }>
 
 const SIGNUP_TICKET_GRANT = 3
-const VIDEO_TICKET_COST = 2
+const VIDEO_TICKET_COST = 1
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_PROMPT_LENGTH = 100
 const MAX_NEGATIVE_PROMPT_LENGTH = 100
@@ -55,13 +61,16 @@ const MIN_DIMENSION = 256
 const MAX_DIMENSION = 3000
 const MIN_CFG = 0
 const MAX_CFG = 10
-const FIXED_FPS = 10
+const FIXED_FPS = 12
 const FIXED_SECONDS = 5
 const FIXED_FRAMES = FIXED_FPS * FIXED_SECONDS
+const UNDERAGE_BLOCK_MESSAGE =
+  'この画像には暴力的な表現、低年齢、または規約違反の可能性があります。別の画像でお試しください。'
+const getWorkflowTemplate = async (mode: 'i2v' | 't2v') =>
+  (mode === 't2v' ? workflowT2VTemplate : workflowI2VTemplate) as Record<string, unknown>
 
-const getWorkflowTemplate = async () => workflowTemplate as Record<string, unknown>
-
-const getNodeMap = async () => nodeMapTemplate as NodeMap
+const getNodeMap = async (mode: 'i2v' | 't2v') =>
+  (mode === 't2v' ? nodeMapT2VTemplate : nodeMapI2VTemplate) as NodeMap
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
@@ -91,18 +100,24 @@ const isGoogleUser = (user: User) => {
 const requireGoogleUser = async (request: Request, env: Env, corsHeaders: HeadersInit) => {
   const token = extractBearerToken(request)
   if (!token) {
-    return { response: jsonResponse({ error: 'Login required.' }, 401, corsHeaders) }
+    return { response: jsonResponse({ error: 'ログインが必要です。' }, 401, corsHeaders) }
   }
   const admin = getSupabaseAdmin(env)
   if (!admin) {
-    return { response: jsonResponse({ error: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not set.' }, 500, corsHeaders) }
+    return {
+      response: jsonResponse(
+        { error: 'SUPABASE_URL または SUPABASE_SERVICE_ROLE_KEY が設定されていません。' },
+        500,
+        corsHeaders,
+      ),
+    }
   }
   const { data, error } = await admin.auth.getUser(token)
   if (error || !data?.user) {
-    return { response: jsonResponse({ error: 'Authentication failed.' }, 401, corsHeaders) }
+    return { response: jsonResponse({ error: '認証に失敗しました。' }, 401, corsHeaders) }
   }
   if (!isGoogleUser(data.user)) {
-    return { response: jsonResponse({ error: 'Google login only.' }, 403, corsHeaders) }
+    return { response: jsonResponse({ error: 'Googleログインのみ対応しています。' }, 403, corsHeaders) }
   }
   return { admin, user: data.user }
 }
@@ -246,10 +261,6 @@ const consumeTicket = async (
 
   if (!existing.user_id) {
     await admin.from('user_tickets').update({ user_id: user.id }).eq('id', existing.id)
-  }
-
-  if (existing.tickets < cost) {
-    return { response: jsonResponse({ error: 'No tickets remaining.' }, 402, corsHeaders) }
   }
 
   const resolvedUsageId = usageId ?? makeUsageId()
@@ -507,7 +518,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url)
   const id = url.searchParams.get('id')
   if (!id) {
-    return jsonResponse({ error: 'id is required.' }, 400, corsHeaders)
+    return jsonResponse({ error: 'idが必要です。' }, 400, corsHeaders)
   }
   if (!env.RUNPOD_API_KEY) {
     return jsonResponse({ error: 'RUNPOD_API_KEY is not set.' }, 500, corsHeaders)
@@ -538,6 +549,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       ticket_cost: VIDEO_TICKET_COST,
     }
     const result = await consumeTicket(auth.admin, auth.user, ticketMeta, usageId, VIDEO_TICKET_COST, corsHeaders)
+    if ('response' in result) {
+      return result.response
+    }
     const nextTickets = Number((result as { ticketsLeft?: unknown }).ticketsLeft)
     if (Number.isFinite(nextTickets)) {
       ticketsLeft = nextTickets
@@ -554,6 +568,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
       ticket_cost: VIDEO_TICKET_COST,
     }
     const refundResult = await refundTicket(auth.admin, auth.user, refundMeta, usageId, VIDEO_TICKET_COST, corsHeaders)
+    if ('response' in refundResult) {
+      return refundResult.response
+    }
     const nextTickets = Number((refundResult as { ticketsLeft?: unknown }).ticketsLeft)
     if (Number.isFinite(nextTickets)) {
       ticketsLeft = nextTickets
@@ -600,29 +617,54 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (input?.workflow) {
     return jsonResponse({ error: 'workflow overrides are not allowed.' }, 400, corsHeaders)
   }
+  const mode = String(input?.mode ?? 'i2v').toLowerCase()
+  if (mode !== 'i2v' && mode !== 't2v') {
+    return jsonResponse({ error: 'mode must be "i2v" or "t2v".' }, 400, corsHeaders)
+  }
+  const isT2V = mode === 't2v'
   const imageValue = input?.image_base64 ?? input?.image ?? input?.image_url
-  if (!imageValue) {
-    return jsonResponse({ error: 'image is required.' }, 400, corsHeaders)
+  if (!isT2V && !imageValue) {
+    return jsonResponse({ error: 'i2vには画像が必要です。' }, 400, corsHeaders)
   }
 
   let imageBase64 = ''
   try {
-    if (typeof input?.image_url === 'string' && input.image_url) {
-      throw new Error('image_url is not allowed. Use base64.')
+    if (imageValue) {
+      if (typeof input?.image_url === 'string' && input.image_url) {
+        throw new Error('image_url is not allowed. Use base64.')
+      }
+      imageBase64 = ensureBase64Input('image', imageValue)
     }
-    imageBase64 = ensureBase64Input('image', imageValue)
   } catch (error) {
-    return jsonResponse({ error: error instanceof Error ? error.message : 'Failed to read image.' }, 400, corsHeaders)
+    return jsonResponse(
+      { error: error instanceof Error ? error.message : '画像の読み取りに失敗しました。' },
+      400,
+      corsHeaders,
+    )
   }
 
-  if (!imageBase64) {
+  if (!isT2V && !imageBase64) {
     return jsonResponse({ error: 'image is empty.' }, 400, corsHeaders)
+  }
+
+  if (!isT2V) {
+    try {
+      if (await isUnderageImage(imageBase64, env)) {
+        return jsonResponse({ error: UNDERAGE_BLOCK_MESSAGE }, 400, corsHeaders)
+      }
+    } catch (error) {
+      return jsonResponse(
+        { error: error instanceof Error ? error.message : 'Age verification failed.' },
+        500,
+        corsHeaders,
+      )
+    }
   }
 
   const prompt = String(input?.prompt ?? input?.text ?? '')
   const negativePrompt = String(input?.negative_prompt ?? input?.negative ?? '')
   const steps = FIXED_STEPS
-  const cfg = Number(input?.cfg ?? input?.guidance_scale ?? 5)
+  const cfg = 1
   const width = Math.floor(Number(input?.width ?? 832))
   const height = Math.floor(Number(input?.height ?? 576))
   const fps = FIXED_FPS
@@ -665,7 +707,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     frames: numFrames,
     fps,
     steps: totalSteps,
-    mode: 'comfyui',
+    mode,
     ticket_cost: VIDEO_TICKET_COST,
   }
   const ticketCheck = await ensureTicketAvailable(auth.admin, auth.user, VIDEO_TICKET_COST, corsHeaders)
@@ -674,19 +716,19 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const imageName = String(input?.image_name ?? 'input.png')
-  const workflow = clone(await getWorkflowTemplate())
+  const workflow = clone(await getWorkflowTemplate(isT2V ? 't2v' : 'i2v'))
   if (!workflow || Object.keys(workflow).length === 0) {
-    return jsonResponse({ error: 'wan-workflow.json is empty. Export a ComfyUI API workflow.' }, 500, corsHeaders)
+    return jsonResponse({ error: 'wan workflow is empty. Export a ComfyUI API workflow.' }, 500, corsHeaders)
   }
 
-  const nodeMap = await getNodeMap().catch(() => null)
+  const nodeMap = await getNodeMap(isT2V ? 't2v' : 'i2v').catch(() => null)
   const hasNodeMap = nodeMap && Object.keys(nodeMap).length > 0
   if (!hasNodeMap) {
-    return jsonResponse({ error: 'wan-node-map.json is empty.' }, 500, corsHeaders)
+    return jsonResponse({ error: 'wan node map is empty.' }, 500, corsHeaders)
   }
 
   const nodeValues: Record<string, unknown> = {
-    image: imageName,
+    image: imageBase64 ? imageName : undefined,
     prompt,
     negative_prompt: negativePrompt,
     seed,
@@ -702,7 +744,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   applyNodeMap(workflow as Record<string, any>, nodeMap as NodeMap, nodeValues)
 
   const comfyKey = String(env.COMFY_ORG_API_KEY ?? '')
-  const images = [{ name: imageName, image: imageBase64 }]
+  const images = imageBase64 ? [{ name: imageName, image: imageBase64 }] : []
   const runpodInput: Record<string, unknown> = {
     workflow,
     images,
@@ -741,6 +783,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       source: 'run',
     }
     const result = await consumeTicket(auth.admin, auth.user, ticketMetaWithJob, usageId, VIDEO_TICKET_COST, corsHeaders)
+    if ('response' in result) {
+      return result.response
+    }
     const nextTickets = Number((result as { ticketsLeft?: unknown }).ticketsLeft)
     if (Number.isFinite(nextTickets)) {
       ticketsLeft = nextTickets
@@ -755,6 +800,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       source: 'run',
     }
     const result = await consumeTicket(auth.admin, auth.user, ticketMetaWithJob, usageId, VIDEO_TICKET_COST, corsHeaders)
+    if ('response' in result) {
+      return result.response
+    }
     const nextTickets = Number((result as { ticketsLeft?: unknown }).ticketsLeft)
     if (Number.isFinite(nextTickets)) {
       ticketsLeft = nextTickets
@@ -771,3 +819,4 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 }
+

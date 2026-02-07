@@ -3,9 +3,9 @@ type CorsEnv = {
 }
 
 const DEFAULT_ALLOWED_ORIGINS = [
-  'https://app.lipdiffusion.uk',
-  'https://llms-3yk.pages.dev',
-  '*.llms-3yk.pages.dev',
+  'https://app.animone.cc',
+  'https://camcam2.pages.dev',
+  '*.camcam2.pages.dev',
 ]
 
 const normalize = (value: string) => value.trim().toLowerCase()

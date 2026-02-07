@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type CSSProperties,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -17,16 +16,20 @@ import './camera.css'
 type RenderResult = {
   id: string
   status: 'queued' | 'running' | 'done' | 'error'
-  image?: string
-  seed?: number
+  video?: string
   error?: string
 }
 
 const MAX_PARALLEL = 1
-const API_ENDPOINT = '/api/qwen'
+const API_ENDPOINT = '/api/wan'
+const FIXED_FPS = 10
+const FIXED_SECONDS = 5
 const FIXED_STEPS = 4
-const FIXED_WIDTH = 1024
-const FIXED_HEIGHT = 1024
+const FIXED_CFG = 1
+const FIXED_WIDTH = 832
+const FIXED_HEIGHT = 576
+const FIXED_FRAME_COUNT = FIXED_FPS * FIXED_SECONDS
+const VIDEO_TICKET_COST = 1
 const OAUTH_REDIRECT_URL =
   import.meta.env.VITE_SUPABASE_REDIRECT_URL ?? (typeof window !== 'undefined' ? window.location.origin : undefined)
 
@@ -52,132 +55,13 @@ const makeId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-type DirectionPreset = {
-  id: string
-  label: string
-  prompt: string
-}
-
-type ElevationPreset = {
-  id: string
-  label: string
-  prompt: string
-}
-
-type PurchasePlan = {
-  id: string
-  label: string
-  price: number
-  tickets: number
-  priceId: string
-}
-
-const DIRECTION_PRESETS: DirectionPreset[] = [
-  { id: 'front', label: '正面', prompt: 'front view' },
-  { id: 'front-right', label: '右前', prompt: 'front-right quarter view' },
-  { id: 'right', label: '右', prompt: 'right side view' },
-  { id: 'back-right', label: '右後', prompt: 'back-right quarter view' },
-  { id: 'back', label: '後ろ', prompt: 'back view' },
-  { id: 'back-left', label: '左後', prompt: 'back-left quarter view' },
-  { id: 'left', label: '左', prompt: 'left side view' },
-  { id: 'front-left', label: '左前', prompt: 'front-left quarter view' },
-]
-
-const ELEVATION_PRESETS: ElevationPreset[] = [
-  { id: 'level', label: '水平 0°', prompt: 'eye-level shot' },
-  { id: 'up45', label: '上 45°', prompt: 'high-angle shot' },
-  { id: 'up90', label: '上 90°', prompt: 'top-down view' },
-  { id: 'down45', label: '下 45°', prompt: 'low-angle shot' },
-  { id: 'down90', label: '下 90°', prompt: 'extreme low-angle shot' },
-]
-
-const PURCHASE_PLANS: PurchasePlan[] = [
-  { id: 'light', label: 'ライト', price: 700, tickets: 30, priceId: 'price_1St4C9AL4umhcfEPAVXlq2RJ' },
-  { id: 'standard', label: 'スタンダード', price: 1500, tickets: 80, priceId: 'price_1St4CaAL4umhcfEP3UzuJtTy' },
-  { id: 'pro', label: 'プロ', price: 3200, tickets: 200, priceId: 'price_1St4D7AL4umhcfEPY3qOc74l' },
-]
-
-const buildEditPrompt = (value: string, directionPrompt?: string, elevationPrompt?: string) => {
-  const trimmed = value.trim()
-  const angleParts = [directionPrompt, elevationPrompt, 'medium shot'].filter(Boolean).join(', ')
-  const angleText = angleParts ? `<sks> ${angleParts}` : ''
-  return [trimmed, angleText].filter(Boolean).join(', ')
-}
-
-const toBase64 = (dataUrl: string) => {
-  const parts = dataUrl.split(',')
-  return parts.length > 1 ? parts[1] : dataUrl
-}
-
-const normalizeImage = (value: unknown) => {
+const normalizeVideo = (value: unknown, filename?: string) => {
   if (typeof value !== 'string' || !value) return null
   if (value.startsWith('data:') || value.startsWith('http')) return value
-  return `data:image/png;base64,${value}`
-}
-
-const extractImageList = (payload: any) => {
-  const output = payload?.output ?? payload?.result ?? payload
-  const listCandidates = [output?.images, output?.outputs, output?.output_images, output?.data, payload?.images]
-  for (const candidate of listCandidates) {
-    if (!Array.isArray(candidate)) continue
-    const normalized = candidate
-      .map((item: any) => normalizeImage(item?.image ?? item?.url ?? item?.data ?? item))
-      .filter(Boolean) as string[]
-    if (normalized.length) return normalized
-  }
-  const singleCandidates = [
-    output?.image,
-    output?.output_image,
-    output?.output_image_base64,
-    output?.message,
-    output?.data,
-    payload?.image,
-    payload?.data,
-  ]
-  for (const candidate of singleCandidates) {
-    const normalized = normalizeImage(candidate)
-    if (normalized) return [normalized]
-  }
-  return []
-}
-
-const extractJobId = (payload: any) => payload?.id || payload?.jobId || payload?.job_id || payload?.output?.id
-
-const sanitizeFilename = (value: string) => value.replace(/[\\/:*?"<>|]+/g, '_').trim()
-
-const normalizeImageExtension = (value: string) => {
-  const ext = value.toLowerCase()
-  if (ext === 'jpeg') return 'jpg'
-  return ext
-}
-
-const inferImageExtension = (value: string, contentType?: string | null) => {
-  const type = contentType?.split(';')[0]?.trim().toLowerCase()
-  if (type && type.startsWith('image/')) {
-    return normalizeImageExtension(type.replace('image/', ''))
-  }
-  if (value.startsWith('data:')) {
-    const match = value.match(/^data:(image\/[a-zA-Z0-9.+-]+);/)
-    if (match) {
-      return normalizeImageExtension(match[1].replace('image/', ''))
-    }
-  }
-  const urlMatch = value.match(/\.([a-zA-Z0-9]+)(?:[?#]|$)/)
-  if (urlMatch) {
-    return normalizeImageExtension(urlMatch[1])
-  }
-  return 'png'
-}
-
-const downloadBlob = (blob: Blob, filename: string) => {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+  const ext = filename?.split('.').pop()?.toLowerCase()
+  const mime =
+    ext === 'webm' ? 'video/webm' : ext === 'gif' ? 'image/gif' : ext === 'mp4' ? 'video/mp4' : 'video/mp4'
+  return `data:${mime};base64,${value}`
 }
 
 const base64ToBlob = (base64: string, mime: string) => {
@@ -227,54 +111,154 @@ const extractErrorMessage = (payload: any) =>
   payload?.output?.output?.error ||
   payload?.result?.output?.error
 
+const POLICY_BLOCK_MESSAGE =
+  'この画像には暴力的な表現、低年齢、または規約違反の可能性があります。別の画像でお試しください。'
+
+const normalizeErrorMessage = (value: unknown) => {
+  if (!value) return 'リクエストに失敗しました。'
+  if (typeof value === 'object') {
+    const maybe = value as { error?: unknown; message?: unknown; detail?: unknown }
+    const picked = maybe?.error ?? maybe?.message ?? maybe?.detail
+    if (typeof picked === 'string' && picked) return picked
+    if (value instanceof Error && value.message) return value.message
+  }
+  const raw = typeof value === 'string' ? value : value instanceof Error ? value.message : String(value)
+  const lowered = raw.toLowerCase()
+  if (
+    lowered.includes('underage') ||
+    lowered.includes('minor') ||
+    lowered.includes('child') ||
+    lowered.includes('age_range') ||
+    lowered.includes('age range') ||
+    lowered.includes('agerange') ||
+    lowered.includes('policy') ||
+    lowered.includes('moderation') ||
+    lowered.includes('violence') ||
+    lowered.includes('rekognition')
+  ) {
+    return POLICY_BLOCK_MESSAGE
+  }
+  const trimmed = raw.trim()
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      const message = parsed?.error || parsed?.message || parsed?.detail
+      if (typeof message === 'string' && message) return message
+    } catch {
+      // ignore parse errors
+    }
+  }
+  return raw
+}
+
+const isTicketShortage = (status: number, message: string) => {
+  if (status === 402) return true
+  const lowered = message.toLowerCase()
+  return (
+    lowered.includes('no tickets') ||
+    lowered.includes('no ticket') ||
+    lowered.includes('insufficient_tickets') ||
+    lowered.includes('insufficient tickets') ||
+    lowered.includes('token不足') ||
+    lowered.includes('トークン') ||
+    lowered.includes('token') ||
+    lowered.includes('credit')
+  )
+}
+
 const isFailureStatus = (status: string) => {
   const normalized = status.toLowerCase()
   return normalized.includes('fail') || normalized.includes('error') || normalized.includes('cancel')
 }
 
+const extractVideoList = (payload: any) => {
+  const output = payload?.output ?? payload?.result ?? payload
+  const nested = output?.output ?? output?.result ?? output?.data ?? payload?.output?.output ?? payload?.result?.output
+  const listCandidates = [
+    output?.videos,
+    output?.outputs,
+    output?.output_videos,
+    output?.gifs,
+    output?.images,
+    payload?.videos,
+    payload?.gifs,
+    payload?.images,
+    nested?.videos,
+    nested?.outputs,
+    nested?.output_videos,
+    nested?.gifs,
+    nested?.images,
+    nested?.data,
+  ]
+  for (const candidate of listCandidates) {
+    if (!Array.isArray(candidate)) continue
+    const normalized = candidate
+      .map((item: any) => {
+        const raw = item?.video ?? item?.data ?? item?.url ?? item
+        const name = item?.filename
+        return normalizeVideo(raw, name)
+      })
+      .filter(Boolean) as string[]
+    if (normalized.length) return normalized
+  }
+  return []
+}
+
+const extractJobId = (payload: any) => payload?.id || payload?.jobId || payload?.job_id || payload?.output?.id
+
 export function Camera() {
-  const [sourcePreview, setSourcePreview] = useState<string | null>(null)
-  const [sourcePayload, setSourcePayload] = useState<string | null>(null)
-  const [sourceName, setSourceName] = useState('')
-  const [sourcePreviewSub, setSourcePreviewSub] = useState<string | null>(null)
-  const [sourcePayloadSub, setSourcePayloadSub] = useState<string | null>(null)
-  const [sourceNameSub, setSourceNameSub] = useState('')
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
-  const [guidanceScale, setGuidanceScale] = useState(1.0)
-  const [useAngle, setUseAngle] = useState(false)
-  const [angleDirectionId, setAngleDirectionId] = useState(DIRECTION_PRESETS[0].id)
-  const [angleElevationId, setAngleElevationId] = useState(ELEVATION_PRESETS[0].id)
   const [results, setResults] = useState<RenderResult[]>([])
-  const [statusMessage, setStatusMessage] = useState('画像をアップロードしてください。')
+  const [statusMessage, setStatusMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)
+  const [step, setStep] = useState(0)
   const [session, setSession] = useState<Session | null>(null)
-  const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'error'>('idle')
-  const [authMessage, setAuthMessage] = useState('')
+  const [authReady, setAuthReady] = useState(!supabase)
   const [ticketCount, setTicketCount] = useState<number | null>(null)
   const [ticketStatus, setTicketStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [ticketMessage, setTicketMessage] = useState('')
   const [showTicketModal, setShowTicketModal] = useState(false)
+  const [errorModalMessage, setErrorModalMessage] = useState<string | null>(null)
   const runIdRef = useRef(0)
   const navigate = useNavigate()
 
   const totalFrames = results.length || 1
-  const completedCount = useMemo(() => results.filter((item) => item.image).length, [results])
+  const completedCount = useMemo(() => results.filter((item) => item.video).length, [results])
   const progress = totalFrames ? completedCount / totalFrames : 0
-  const displayImage = results[0]?.image ?? null
-  const hasAnySource = Boolean(sourcePayload || sourcePayloadSub)
-  const emptyMessage = hasAnySource ? '生成ボタンを押してください。' : '画像をアップロードしてください。'
+  const displayVideo = results[0]?.video ?? null
   const accessToken = session?.access_token ?? ''
+  const totalSteps = 3
+  const stepTitles = ['プロンプト入力', 'ネガティブ入力', '確認して生成'] as const
+  const stepDescriptions = [
+    '',
+    '任意: 避けたい内容を入力。',
+    '利用規約に同意して内容を確認して生成。',
+  ] as const
+  const canAdvancePrompt = prompt.trim().length > 0
+
+  const viewerStyle = useMemo(
+    () =>
+      ({
+        '--progress': progress,
+      }) as CSSProperties,
+    [progress],
+  )
 
   useEffect(() => {
-    if (!supabase) return
-    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null))
+    if (!supabase) {
+      setAuthReady(true)
+      return
+    }
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session ?? null)
+      setAuthReady(true)
+    })
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
-      setAuthStatus('idle')
-      setAuthMessage('')
+      setAuthReady(true)
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -308,13 +292,15 @@ export function Camera() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         setTicketStatus('error')
-        setTicketMessage(data?.error || 'チケット情報の取得に失敗しました。')
+        setTicketMessage(data?.error || 'トークン取得に失敗しました。')
         setTicketCount(null)
-        return
+        return null
       }
+      const nextCount = Number(data?.tickets ?? 0)
       setTicketStatus('idle')
       setTicketMessage('')
-      setTicketCount(Number(data?.tickets ?? 0))
+      setTicketCount(nextCount)
+      return nextCount
     },
     [],
   )
@@ -329,64 +315,22 @@ export function Camera() {
     void fetchTickets(accessToken)
   }, [accessToken, fetchTickets, session])
 
-  useEffect(() => {
-    if (session && hasAnySource && statusMessage.includes('ログイン')) {
-      setStatusMessage('生成準備OK')
-    }
-  }, [hasAnySource, session, statusMessage])
-
-  useEffect(() => {
-    if (!session && hasAnySource && !isRunning) {
-      setStatusMessage('Googleでログインしてください。')
-    }
-  }, [hasAnySource, isRunning, session])
-
-  const viewerStyle = useMemo(
-    () =>
-      ({
-        '--progress': progress,
-      }) as CSSProperties,
-    [progress],
-  )
-
-  const applyImageAt = useCallback((index: number, image: string) => {
-    setResults((prev) =>
-      prev.map((item, itemIndex) => ({
-        ...item,
-        status: itemIndex === index ? 'done' : item.status,
-        image: itemIndex === index ? image : item.image,
-      })),
-    )
-  }, [])
-
-  const submitEdit = useCallback(
-    async (
-      editPrompt: string,
-      payload: string,
-      subPayload: string | null,
-      payloadName: string,
-      subName: string | null,
-      token: string,
-      angleStrength: number,
-    ) => {
-      if (!payload) throw new Error('画像がありません。')
+  const submitVideo = useCallback(
+    async (token: string) => {
       const input: Record<string, unknown> = {
-        image_base64: payload,
-        image_name: payloadName || 'input.png',
-        prompt: editPrompt,
+        mode: 't2v',
+        prompt,
         negative_prompt: negativePrompt,
-        guidance_scale: guidanceScale,
-        num_inference_steps: FIXED_STEPS,
         width: FIXED_WIDTH,
         height: FIXED_HEIGHT,
+        fps: FIXED_FPS,
+        seconds: FIXED_SECONDS,
+        num_frames: FIXED_FRAME_COUNT,
+        steps: FIXED_STEPS,
+        cfg: FIXED_CFG,
         seed: 0,
         randomize_seed: true,
         worker_mode: 'comfyui',
-        angle_strength: angleStrength,
-      }
-      if (subPayload) {
-        input.sub_image_base64 = subPayload
-        input.sub_image_name = subName || 'sub.png'
       }
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (token) {
@@ -398,295 +342,275 @@ export function Camera() {
         body: JSON.stringify({ input }),
       })
       const data = await res.json().catch(() => ({}))
-      const usageId = String(data?.usage_id ?? data?.usageId ?? '')
       if (!res.ok) {
-        const message = data?.error || data?.message || '生成に失敗しました。'
+        const rawMessage = data?.error || data?.message || data?.detail || '生成に失敗しました。'
+        const message = normalizeErrorMessage(rawMessage)
+        if (isTicketShortage(res.status, message)) {
+          setShowTicketModal(true)
+          setStatusMessage('トークン不足')
+          throw new Error('TICKET_SHORTAGE')
+        }
+        setErrorModalMessage(message)
         throw new Error(message)
       }
-      const images = extractImageList(data)
-      if (images.length) {
-        return { images, usageId }
+      const nextTickets = Number(data?.ticketsLeft ?? data?.tickets_left)
+      if (Number.isFinite(nextTickets)) {
+        setTicketCount(nextTickets)
+      }
+      const videos = extractVideoList(data)
+      if (videos.length) {
+        return { videos }
       }
       const jobId = extractJobId(data)
-      if (!jobId) throw new Error('ジョブIDが取得できませんでした。')
-      return { jobId, usageId }
+      if (!jobId) throw new Error('ジョブID取得に失敗しました。')
+      return { jobId }
     },
-    [guidanceScale, negativePrompt],
+    [negativePrompt, prompt],
   )
 
-  const pollJob = useCallback(async (jobId: string, runId: number, token?: string, usageId?: string) => {
-    for (let i = 0; i < 120; i += 1) {
-      if (runIdRef.current !== runId) return { status: 'cancelled' as const, images: [] }
+  const pollJob = useCallback(async (jobId: string, runId: number, token?: string) => {
+    for (let i = 0; i < 180; i += 1) {
+      if (runIdRef.current !== runId) return { status: 'cancelled' as const, videos: [] }
       const headers: Record<string, string> = {}
       if (token) {
         headers.Authorization = `Bearer ${token}`
       }
-      const query = new URLSearchParams({ id: jobId })
-      if (usageId) {
-        query.set('usage_id', usageId)
-      }
-      const res = await fetch(`${API_ENDPOINT}?${query.toString()}`, { headers })
+      const res = await fetch(`${API_ENDPOINT}?id=${encodeURIComponent(jobId)}`, { headers })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const message = data?.error || data?.message || 'ステータス取得に失敗しました。'
+        const rawMessage = data?.error || data?.message || data?.detail || '状態取得に失敗しました。'
+        const message = normalizeErrorMessage(rawMessage)
+        if (isTicketShortage(res.status, message)) {
+          setShowTicketModal(true)
+          setStatusMessage('トークン不足')
+          throw new Error('TICKET_SHORTAGE')
+        }
+        setErrorModalMessage(message)
         throw new Error(message)
+      }
+      const nextTickets = Number(data?.ticketsLeft ?? data?.tickets_left)
+      if (Number.isFinite(nextTickets)) {
+        setTicketCount(nextTickets)
       }
       const status = String(data?.status || data?.state || '').toLowerCase()
       const statusError = extractErrorMessage(data)
+      if (statusError) {
+        const normalized = normalizeErrorMessage(statusError)
+        if (isTicketShortage(res.status, normalized)) {
+          setShowTicketModal(true)
+          setStatusMessage('トークン不足')
+          throw new Error('TICKET_SHORTAGE')
+        }
+      }
       if (statusError || isFailureStatus(status)) {
-        throw new Error(statusError || '生成に失敗しました。')
+        throw new Error(normalizeErrorMessage(statusError || '生成に失敗しました。'))
       }
-      const images = extractImageList(data)
-      if (images.length) {
-        return { status: 'done' as const, images }
+      const videos = extractVideoList(data)
+      if (videos.length) {
+        return { status: 'done' as const, videos }
       }
-      await wait(1500 + i * 40)
+      await wait(2000 + i * 50)
     }
     throw new Error('生成がタイムアウトしました。')
   }, [])
 
-  const startBatch = useCallback(
-    async (payload: string, subPayload: string | null, payloadName: string, subName: string | null) => {
-      if (!payload) return
-      if (!session) {
-        setStatusMessage('Googleでログインしてください。')
+  const startBatch = useCallback(async () => {
+    if (!session) {
+      setStatusMessage('Googleでログインしてください。')
+      return
+    }
+    if (ticketStatus === 'loading') {
+      setStatusMessage('トークン確認中...')
+      return
+    }
+    if (accessToken) {
+      setStatusMessage('トークン確認中...')
+      const latestCount = await fetchTickets(accessToken)
+      if (latestCount !== null && latestCount < VIDEO_TICKET_COST) {
+        setShowTicketModal(true)
         return
       }
-      const runId = runIdRef.current + 1
-      runIdRef.current = runId
-      setIsRunning(true)
-      setStatusMessage('生成中… 約1分で完了予定')
-      setResults([{ id: makeId(), status: 'queued' as const }])
+    } else if (ticketCount === null) {
+      setStatusMessage('トークン確認中...')
+      return
+    } else if (ticketCount < VIDEO_TICKET_COST) {
+      setShowTicketModal(true)
+      return
+    }
+    const runId = runIdRef.current + 1
+    runIdRef.current = runId
+    setIsRunning(true)
+    setStatusMessage('')
+    setResults([{ id: makeId(), status: 'queued' as const }])
 
-      try {
-        const tasks = [async () => {
+    try {
+      const tasks = [async () => {
+        if (runIdRef.current !== runId) return
+        setResults((prev) =>
+          prev.map((item, itemIndex) =>
+            itemIndex === 0 ? { ...item, status: 'running' as const, error: undefined } : item,
+          ),
+        )
+        try {
+          const submitted = await submitVideo(accessToken)
           if (runIdRef.current !== runId) return
-          setResults((prev) =>
-            prev.map((item, itemIndex) =>
-              itemIndex === 0 ? { ...item, status: 'running' as const, error: undefined } : item,
-            ),
-          )
-          const directionPrompt = useAngle
-            ? DIRECTION_PRESETS.find((preset) => preset.id === angleDirectionId)?.prompt
-            : undefined
-          const elevationPrompt = useAngle
-            ? ELEVATION_PRESETS.find((preset) => preset.id === angleElevationId)?.prompt
-            : undefined
-          const editPrompt = buildEditPrompt(prompt, directionPrompt, elevationPrompt)
-          try {
-            const angleStrength = useAngle ? 1 : 0
-            const submitted = await submitEdit(
-              editPrompt,
-              payload,
-              subPayload,
-              payloadName,
-              subName,
-              accessToken,
-              angleStrength,
-            )
-            if (runIdRef.current !== runId) return
-            if ('images' in submitted && submitted.images.length) {
-              applyImageAt(0, submitted.images[0])
-              return
-            }
-            if ('jobId' in submitted) {
-              const submittedUsage = (submitted as { usageId?: string }).usageId ?? ''
-              if (!submittedUsage) {
-                throw new Error('usage_idが取得できませんでした。')
-              }
-              const polled = await pollJob(submitted.jobId, runId, accessToken, submittedUsage)
-              if (runIdRef.current !== runId) return
-              if (polled.status === 'done' && polled.images.length) {
-                applyImageAt(0, polled.images[0])
-              }
-            }
-          } catch (error) {
-            if (runIdRef.current !== runId) return
-            const message = error instanceof Error ? error.message : 'リクエストに失敗しました。'
+          if ('videos' in submitted && submitted.videos.length) {
             setResults((prev) =>
               prev.map((item, itemIndex) =>
-                itemIndex === 0 ? { ...item, status: 'error' as const, error: message } : item,
+                itemIndex === 0 ? { ...item, status: 'done' as const, video: submitted.videos[0] } : item,
               ),
             )
-            setStatusMessage(message)
+            return
           }
-        }]
-
-        await runQueue(tasks, MAX_PARALLEL)
-        if (runIdRef.current === runId) {
-          setStatusMessage('生成完了')
-          if (accessToken) {
-            void fetchTickets(accessToken)
+          if ('jobId' in submitted) {
+            const polled = await pollJob(submitted.jobId, runId, accessToken)
+            if (runIdRef.current !== runId) return
+            if (polled.status === 'done' && polled.videos.length) {
+              setResults((prev) =>
+                prev.map((item, itemIndex) =>
+                  itemIndex === 0 ? { ...item, status: 'done' as const, video: polled.videos[0] } : item,
+                ),
+              )
+            }
           }
+        } catch (error) {
+          if (runIdRef.current !== runId) return
+          const message = normalizeErrorMessage(error instanceof Error ? error.message : error)
+          if (message === 'TICKET_SHORTAGE') {
+            setResults((prev) =>
+              prev.map((item, itemIndex) =>
+                itemIndex === 0 ? { ...item, status: 'error' as const, error: 'トークン不足' } : item,
+              ),
+            )
+            setStatusMessage('トークン不足')
+            return
+          }
+          setResults((prev) =>
+            prev.map((item, itemIndex) =>
+              itemIndex === 0 ? { ...item, status: 'error' as const, error: message } : item,
+            ),
+          )
+          setStatusMessage(message)
+          setErrorModalMessage(message)
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '生成に失敗しました。'
-        setStatusMessage(message)
-        setResults((prev) => prev.map((item) => ({ ...item, status: 'error', error: message })))
-      } finally {
-        if (runIdRef.current === runId) {
-          setIsRunning(false)
+      }]
+
+      await runQueue(tasks, MAX_PARALLEL)
+      if (runIdRef.current === runId) {
+        setStatusMessage('完了')
+        if (accessToken) {
+          void fetchTickets(accessToken)
         }
       }
-    },
-    [
-      accessToken,
-      angleDirectionId,
-      angleElevationId,
-      applyImageAt,
-      fetchTickets,
-      pollJob,
-      prompt,
-      session,
-      submitEdit,
-      useAngle,
-    ],
-  )
+    } catch (error) {
+      const message = normalizeErrorMessage(error instanceof Error ? error.message : error)
+      setStatusMessage(message)
+      setResults((prev) => prev.map((item) => ({ ...item, status: 'error', error: message })))
+      setErrorModalMessage(message)
+    } finally {
+      if (runIdRef.current === runId) {
+        setIsRunning(false)
+      }
+    }
+  }, [accessToken, fetchTickets, pollJob, session, submitVideo, ticketCount, ticketStatus])
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) {
+      setStatusMessage('プロンプトを入力してください。')
+      return
+    }
+    await startBatch()
+  }
+
+  const handleNext = () => {
+    setStep((prev) => Math.min(prev + 1, totalSteps - 1))
+  }
+
+  const handleBack = () => {
+    setStep((prev) => Math.max(prev - 1, 0))
+  }
+
+  const handleSkipNegative = () => {
+    setNegativePrompt('')
+    setStep(totalSteps - 1)
+  }
 
   const handleGoogleSignIn = async () => {
     if (!supabase || !isAuthConfigured) {
-      setAuthStatus('error')
-      setAuthMessage('認証の設定が未完了です。')
+      window.alert('認証設定が未完了です。')
       return
     }
-    setAuthStatus('loading')
-    setAuthMessage('')
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: OAUTH_REDIRECT_URL, skipBrowserRedirect: true },
     })
     if (error) {
-      setAuthStatus('error')
-      setAuthMessage(error.message)
+      window.alert(error.message)
       return
     }
     if (data?.url) {
       window.location.assign(data.url)
       return
     }
-    setAuthStatus('error')
-    setAuthMessage('認証URLを取得できませんでした。')
+    window.alert('認証URLの取得に失敗しました。')
   }
 
-  const handleSignOut = async () => {
-    if (!supabase) return
-    try {
-      await supabase.auth.signOut({ scope: 'local' })
-    } catch (error) {
-      setAuthStatus('error')
-      setAuthMessage(error instanceof Error ? error.message : 'ログアウトに失敗しました。')
-    }
-  }
+  const isGif = displayVideo?.startsWith('data:image/gif')
+  const canDownload = Boolean(displayVideo && !isGif)
 
-  const clearMainImage = useCallback(() => {
-    setSourcePreview(null)
-    setSourcePayload(null)
-    setSourceName('')
-  }, [])
-
-  const clearSubImage = useCallback(() => {
-    setSourcePreviewSub(null)
-    setSourcePayloadSub(null)
-    setSourceNameSub('')
-  }, [])
-
-  const handleMainFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '')
-      const payload = toBase64(dataUrl)
-      setSourcePreview(dataUrl)
-      setSourcePayload(payload)
-      setSourceName(file.name)
-      setStatusMessage(session ? '生成準備OK' : 'Googleでログインしてください。')
-    }
-    reader.readAsDataURL(file)
-  }
-
-  const handleSubFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '')
-      const payload = toBase64(dataUrl)
-      setSourcePreviewSub(dataUrl)
-      setSourcePayloadSub(payload)
-      setSourceNameSub(file.name)
-      setStatusMessage(session ? '生成準備OK' : 'Googleでログインしてください。')
-    }
-    reader.readAsDataURL(file)
-  }
-
-  const handleGenerate = async () => {
-    const primaryPayload = sourcePayload ?? sourcePayloadSub
-    if (!primaryPayload || isRunning) {
-      if (!primaryPayload) {
-        setStatusMessage('画像をアップロードしてください。')
-      }
-      return
-    }
-    if (!session) {
-      setStatusMessage('Googleでログインしてください。')
-      return
-    }
-    if (ticketStatus === 'loading') {
-      setStatusMessage('チケット確認中…')
-      return
-    }
-    if (ticketCount !== null && ticketCount <= 0) {
-      setShowTicketModal(true)
-      return
-    }
-    const primaryName = sourcePayload ? sourceName : sourceNameSub
-    const secondaryPayload = sourcePayload && sourcePayloadSub ? sourcePayloadSub : null
-    const secondaryName = sourcePayload && sourcePayloadSub ? sourceNameSub : null
-    await startBatch(primaryPayload, secondaryPayload, primaryName, secondaryName)
-  }
-
-  const handleSaveImage = useCallback(async () => {
-    if (!displayImage) return
-    const baseLabel = sanitizeFilename(sourceName || sourceNameSub || 'qwen-edit') || 'qwen-edit'
+  const handleDownload = useCallback(async () => {
+    if (!displayVideo) return
+    const filename = `animoni-video.${isGif ? 'gif' : 'mp4'}`
     try {
       let blob: Blob
-      if (displayImage.startsWith('data:')) {
-        blob = dataUrlToBlob(displayImage, 'image/png')
-      } else if (displayImage.startsWith('http') || displayImage.startsWith('blob:')) {
-        const response = await fetch(displayImage, { cache: 'force-cache' })
-        if (!response.ok) {
-          throw new Error('Failed to download image.')
-        }
+      if (displayVideo.startsWith('data:')) {
+        blob = dataUrlToBlob(displayVideo, isGif ? 'image/gif' : 'video/mp4')
+      } else if (displayVideo.startsWith('http') || displayVideo.startsWith('blob:')) {
+        const response = await fetch(displayVideo)
         blob = await response.blob()
       } else {
-        blob = base64ToBlob(displayImage, 'image/png')
+        blob = base64ToBlob(displayVideo, isGif ? 'image/gif' : 'video/mp4')
       }
-      const extension = inferImageExtension(displayImage, blob.type)
-      const fileType = blob.type || `image/${extension}`
-      const file = new File([blob], `${baseLabel}.${extension}`, { type: fileType })
+      const fileType = blob.type || (isGif ? 'image/gif' : 'video/mp4')
+      const file = new File([blob], filename, { type: fileType })
       const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function'
       const canShareFiles =
         canShare && typeof navigator.canShare === 'function' ? navigator.canShare({ files: [file] }) : canShare
       if (isProbablyMobile() && canShareFiles) {
         try {
-          await navigator.share({ files: [file], title: file.name })
+          await navigator.share({ files: [file], title: filename })
           return
         } catch {
           // Ignore share cancellations and fall back to download.
         }
       }
-      downloadBlob(blob, file.name)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch {
-      window.open(displayImage, '_blank', 'noopener')
+      window.location.assign(displayVideo)
     }
-  }, [displayImage, sourceName, sourceNameSub])
+  }, [displayVideo, isGif])
+
+  if (!authReady) {
+    return (
+      <div className="camera-app">
+        <TopNav />
+        <div className="auth-boot" />
+      </div>
+    )
+  }
 
   if (!session) {
     return (
       <div className="camera-app">
         <TopNav />
-        <GuestIntro mode="image" onSignIn={handleGoogleSignIn} />
+        <GuestIntro mode="video" onSignIn={handleGoogleSignIn} />
       </div>
     )
   }
@@ -694,208 +618,150 @@ export function Camera() {
   return (
     <div className="camera-app">
       <TopNav />
-      <header className="camera-hero">
-        <div>
-          <p className="camera-hero__eyebrow">YAJU AI</p>
-          <h1>YAJU AI</h1>
-          <p className="camera-hero__lede">画像をアップロードして、指示を書いて、生成を押すだけ。</p>
-        </div>
-        <div className="camera-hero__badge">
-          <span>革命的AI</span>
-          <strong>画像を自由に編集</strong>
-        </div>
-      </header>
-
-      <div className="camera-shell">
-        <section className="camera-panel">
-          <div className="panel-header">
-            <div className="panel-title">
-              <h2>入力</h2>
-              <span>{statusMessage}</span>
-            </div>
-            <div className="panel-auth">
-              {session ? (
-                <div className="auth-status">
-                  <span className="auth-email">{session.user?.email ?? 'ログイン中'}</span>
-                  <button type="button" className="ghost-button" onClick={handleSignOut}>
-                    ログアウト
-                  </button>
+      <div className="wizard-shell">
+        <section className="wizard-panel wizard-panel--inputs">
+          <div className="wizard-card wizard-card--step">
+            <div className="wizard-stepper">
+              <div className="wizard-stepper__meta">
+                <span>{`ステップ ${step + 1} / ${totalSteps}`}</span>
+                <div className="wizard-dots">
+                  {Array.from({ length: totalSteps }).map((_, index) => (
+                    <span
+                      key={`t2v-step-${index}`}
+                      className={`wizard-dot${index <= step ? ' is-active' : ''}`}
+                    />
+                  ))}
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={handleGoogleSignIn}
-                  disabled={authStatus === 'loading'}
-                >
-                  {authStatus === 'loading' ? '接続中…' : 'Googleで新規登録 / ログイン'}
+              </div>
+              <div className="wizard-status">
+                {ticketStatus === 'loading' && 'トークン確認中...'}
+                {ticketStatus !== 'loading' && `トークン残り: ${ticketCount ?? 0}`}
+                {ticketStatus === 'error' && ticketMessage ? ` / ${ticketMessage}` : ''}
+              </div>
+              <h2>{stepTitles[step]}</h2>
+              <p>{stepDescriptions[step]}</p>
+            </div>
+
+            {step === 0 && (
+              <label className="wizard-field">
+                <span>作りたい動画の内容を入力してください</span>
+                <textarea
+                  rows={4}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="例: 夜景の街を歩くカップル"
+                />
+              </label>
+            )}
+
+            {step === 1 && (
+              <label className="wizard-field">
+                <span>ネガティブプロンプト</span>
+                <textarea
+                  rows={3}
+                  value={negativePrompt}
+                  onChange={(e) => setNegativePrompt(e.target.value)}
+                  placeholder="任意: 避けたい内容を入力。"
+                />
+              </label>
+            )}
+
+            {step === 2 && (
+              <div className="wizard-summary">
+                <div>
+                  <p>プロンプト</p>
+                  <strong>{prompt || '—'}</strong>
+                </div>
+                <div>
+                  <p>ネガティブプロンプト</p>
+                  <strong>{negativePrompt || 'なし'}</strong>
+                </div>
+              </div>
+            )}
+
+            <div className="wizard-actions">
+              {step > 0 && (
+                <button type="button" className="ghost-button" onClick={handleBack}>
+                  戻る
+                </button>
+              )}
+              {step === 0 && (
+                <button type="button" className="primary-button" onClick={handleNext} disabled={!canAdvancePrompt}>
+                  次へ
+                </button>
+              )}
+              {step === 1 && (
+                <button type="button" className="primary-button" onClick={handleNext}>
+                  次へ
+                </button>
+              )}
+              {step === 2 && (
+                <button type="button" className="primary-button" onClick={handleGenerate} disabled={isRunning || !session}>
+                  {isRunning ? '生成中...' : '動画を生成'}
                 </button>
               )}
             </div>
           </div>
-          {authMessage && <div className="auth-message">{authMessage}</div>}
-          {session && (
-            <div className="ticket-message">
-              {ticketStatus === 'loading' && 'チケット確認中…'}
-              {ticketStatus !== 'loading' && `残りチケット: ${ticketCount ?? 0}`}
-              {ticketStatus === 'error' && ticketMessage ? ` / ${ticketMessage}` : ''}
-            </div>
-          )}
-          <label className="upload-box">
-            <input type="file" accept="image/*" onChange={handleMainFileChange} />
-            <div>
-              <strong>{sourceName || 'メイン画像をアップロード'}</strong>
-              <span>PNG/JPGに対応。アップロード後に生成できます。</span>
-            </div>
-          </label>
-          {sourcePreview && (
-            <div className="preview-card">
-              <button
-                type="button"
-                className="preview-card__remove"
-                onClick={clearMainImage}
-                aria-label="Remove image"
-              >
-                x
-              </button>
-              <img src={sourcePreview} alt="メイン画像プレビュー" />
-            </div>
-          )}
-          <label className="upload-box">
-            <input type="file" accept="image/*" onChange={handleSubFileChange} />
-            <div>
-              <strong>{sourceNameSub || 'サブ画像（任意）をアップロード'}</strong>
-              <span>PNG/JPGに対応。アップロード後に生成できます。</span>
-            </div>
-          </label>
-          {sourcePreviewSub && (
-            <div className="preview-card">
-              <button
-                type="button"
-                className="preview-card__remove"
-                onClick={clearSubImage}
-                aria-label="Remove image"
-              >
-                x
-              </button>
-              <img src={sourcePreviewSub} alt="サブ画像プレビュー" />
-            </div>
-          )}
-
-          <div className="settings-block">
-            <h3>設定</h3>
-            <label>
-              <span>プロンプト</span>
-              <input value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-            </label>
-            <label>
-              <span>ネガティブプロンプト</span>
-              <input value={negativePrompt} onChange={(e) => setNegativePrompt(e.target.value)} />
-            </label>
-            <label>
-              <span>プロンプト適用度（推奨1）</span>
-              <input
-                type="range"
-                min={1}
-                max={2}
-                step={0.1}
-                value={guidanceScale}
-                onChange={(e) => setGuidanceScale(Number(e.target.value))}
-              />
-              <em>{guidanceScale.toFixed(1)}</em>
-            </label>
-            <label className="toggle">
-              <span>アングル変更</span>
-              <input type="checkbox" checked={useAngle} onChange={(e) => setUseAngle(e.target.checked)} />
-            </label>
-            {useAngle && (
-              <>
-                <label>
-                  <span>方角（8方向）</span>
-                  <select value={angleDirectionId} onChange={(e) => setAngleDirectionId(e.target.value)}>
-                    {DIRECTION_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>上下角度</span>
-                  <select value={angleElevationId} onChange={(e) => setAngleElevationId(e.target.value)}>
-                    {ELEVATION_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </>
-            )}
-          </div>
-
-          <button
-            type="button"
-          className="primary-button"
-          onClick={handleGenerate}
-          disabled={(!sourcePayload && !sourcePayloadSub) || isRunning || !session}
-        >
-            {isRunning ? '生成中…' : '生成'}
-          </button>
         </section>
 
-        <section className="camera-stage">
-          <div className="stage-header">
-            <div>
-              <h2>プレビュー</h2>
-              <p>最新の出力をここに表示します。</p>
-            </div>
-            {displayImage && (
-              <div className="stage-actions">
-                <button type="button" className="ghost-button" onClick={handleSaveImage}>
-                  保存
+        <section className="wizard-panel wizard-panel--preview">
+          <div className="wizard-card wizard-card--preview">
+            <div className="wizard-card__header">
+              <div>
+                <p className="wizard-eyebrow">プレビュー</p>
+                {statusMessage && !isRunning && <span>{statusMessage}</span>}
+              </div>
+              {canDownload && (
+                <button type="button" className="ghost-button" onClick={handleDownload}>
+                  ダウンロード
                 </button>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          <div className="stage-viewer" style={viewerStyle}>
-            <div className="viewer-progress" aria-hidden="true" />
-            {displayImage ? (
-              <img src={displayImage} alt="生成結果" />
-            ) : (
-              <div className="stage-placeholder">{emptyMessage}</div>
-            )}
-            {isRunning && (
-              <div className="loading-overlay" role="status" aria-live="polite">
-                <div className="loading-card">
-                  <span className="loading-spinner" aria-hidden="true" />
-                  <div>
-                    <strong>生成中</strong>
-                    <p>約1分で完了予定</p>
-                  </div>
+            <div className="stage-viewer" style={viewerStyle}>
+              <div className="viewer-progress" aria-hidden="true" />
+              {isRunning ? (
+                <div className="loading-display" role="status" aria-live="polite">
+                  <div className="loading-orb" aria-hidden="true" />
+                  <span className="loading-blink">生成中...</span>
+                  <p>まもなく完了します。</p>
                 </div>
-              </div>
-            )}
-            {isRunning && (
-              <div className="viewer-hud">
-                <span>{`生成中 ${completedCount}/${totalFrames}`}</span>
-              </div>
-            )}
+              ) : displayVideo ? (
+                isGif ? (
+                  <img src={displayVideo} alt="結果" />
+                ) : (
+                  <video controls src={displayVideo} />
+                )
+              ) : (
+                <div className="stage-placeholder">プロンプトを入力してください。</div>
+              )}
+            </div>
           </div>
         </section>
-      </div>
-      {showTicketModal && (
+      </div>{showTicketModal && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
-            <h3>チケットがありません</h3>
-            <p>生成にはチケットが必要です。購入ページへ移動しますか？</p>
+            <h3>トークン不足</h3>
+            <p>動画生成は1トークンです。購入ページへ移動しますか？</p>
             <div className="modal-actions">
               <button type="button" className="ghost-button" onClick={() => setShowTicketModal(false)}>
                 閉じる
               </button>
               <button type="button" className="primary-button" onClick={() => navigate('/purchase')}>
-                チケット購入へ
+                トークン購入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {errorModalMessage && (
+        <div className="modal-overlay" role="dialog" aria-modal="true">
+          <div className="modal-card">
+            <h3>リクエストが拒否されました</h3>
+            <p>{errorModalMessage}</p>
+            <div className="modal-actions">
+              <button type="button" className="primary-button" onClick={() => setErrorModalMessage(null)}>
+                閉じる
               </button>
             </div>
           </div>
@@ -904,3 +770,7 @@ export function Camera() {
     </div>
   )
 }
+
+
+
+
