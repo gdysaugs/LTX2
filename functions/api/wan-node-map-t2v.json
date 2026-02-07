@@ -1,0 +1,11 @@
+{
+  "prompt": { "id": "9", "input": "text" },
+  "negative_prompt": { "id": "96", "input": "text" },
+  "seed": { "id": "8", "input": "seed" },
+  "steps": { "id": "8", "input": "steps" },
+  "cfg": { "id": "8", "input": "cfg" },
+  "width": { "id": "28", "input": "width" },
+  "height": { "id": "28", "input": "height" },
+  "num_frames": { "id": "28", "input": "length" },
+  "fps": { "id": "39", "input": "frame_rate" }
+}

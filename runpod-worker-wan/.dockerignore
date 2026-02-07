@@ -1,0 +1,11 @@
+.git
+__pycache__/
+*.pyc
+.DS_Store
+models/loras/**
+models/unet/*
+!models/unet/wan2.2-rapid-mega-aio-nsfw-v12.1-Q8_0.gguf
+models/text_encoders/*
+!models/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors
+models/vae/*
+!models/vae/wan_2.1_vae.safetensors

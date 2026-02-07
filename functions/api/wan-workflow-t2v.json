@@ -1,0 +1,133 @@
+{
+  "39": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "video\\wan\\aio\\mega_v10\\coffe_t2v",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true,
+      "pix_fmt": "yuv420p",
+      "crf": 12,
+      "save_metadata": true,
+      "trim_to_audio": false
+    }
+  },
+  "32": {
+    "class_type": "ModelSamplingSD3",
+    "inputs": {
+      "model": [
+        "79",
+        0
+      ],
+      "shift": 8
+    }
+  },
+  "53": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    }
+  },
+  "72": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    }
+  },
+  "8": {
+    "class_type": "KSampler",
+    "inputs": {
+      "positive": [
+        "28",
+        0
+      ],
+      "negative": [
+        "28",
+        1
+      ],
+      "latent_image": [
+        "28",
+        2
+      ],
+      "seed": 6456545463455,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "ipndm",
+      "scheduler": "beta",
+      "denoise": 1,
+      "model": [
+        "32",
+        0
+      ]
+    }
+  },
+  "28": {
+    "class_type": "WanVaceToVideo",
+    "inputs": {
+      "width": 832,
+      "height": 480,
+      "batch_size": 1,
+      "strength": 0,
+      "vae": [
+        "53",
+        0
+      ],
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "96",
+        0
+      ],
+      "length": 65
+    }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "8",
+        0
+      ],
+      "vae": [
+        "53",
+        0
+      ]
+    }
+  },
+  "79": {
+    "class_type": "UnetLoaderGGUF",
+    "inputs": {
+      "unet_name": "wan2.2-rapid-mega-aio-nsfw-v12.1-Q8_0.gguf"
+    }
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "72",
+        0
+      ],
+      "text": "A woman is sitting on a table. The camera smoothly rotates around her, gradually zooming in to focus on her eyes as she raises the hand to touch her hair."
+    }
+  },
+  "96": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "72",
+        0
+      ],
+      "text": ""
+    }
+  }
+}

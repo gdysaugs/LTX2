@@ -1,0 +1,18 @@
+{
+  "image": [
+    { "id": "16", "input": "image" },
+    { "id": "37", "input": "image" }
+  ],
+  "prompt": { "id": "9", "input": "text" },
+  "negative_prompt": { "id": "96", "input": "text" },
+  "seed": { "id": "55", "input": "seed" },
+  "steps": { "id": "55", "input": "steps" },
+  "cfg": { "id": "55", "input": "cfg" },
+  "width": { "id": "54", "input": "width" },
+  "height": { "id": "54", "input": "height" },
+  "num_frames": [
+    { "id": "34", "input": "num_frames" },
+    { "id": "54", "input": "length" }
+  ],
+  "fps": { "id": "57", "input": "frame_rate" }
+}
