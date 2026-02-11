@@ -113,5 +113,5 @@ export const isUnderageImage = async (base64: string, env: RekognitionEnv) => {
   }
   const data = await response.json().catch(() => null)
   const faces = Array.isArray(data?.FaceDetails) ? data.FaceDetails : []
-  return faces.some((face: any) => Number(face?.AgeRange?.High) < 13)
+  return faces.some((face: any) => Number(face?.AgeRange?.High) < 1)
 }

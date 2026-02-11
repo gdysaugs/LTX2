@@ -109,14 +109,11 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
         <ul>
           <li>販売事業者名：Animone AI</li>
           <li>運営責任者：Animone運営責任者</li>
-          <li>所在地：請求があった場合、遅滞なく開示します</li>
-          <li>連絡先：お問い合わせはメールにて受け付けます</li>
           <li>販売価格：各プランページに表示</li>
           <li>商品代金以外の必要料金：通信料等はお客様の負担となります</li>
           <li>支払方法：クレジットカード（Linkを含む）</li>
           <li>支払時期：決済時に即時処理されます</li>
           <li>提供時期：決済完了後すぐに利用可能</li>
-          <li>返品・キャンセル：デジタル商品の性質上、原則不可</li>
           <li>動作環境：最新のChrome / Edge / Safari 推奨</li>
         </ul>
       </section>
