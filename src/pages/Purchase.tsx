@@ -8,30 +8,6 @@ import './camera.css'
 
 const OAUTH_REDIRECT_URL = getOAuthRedirectUrl()
 
-const formatRemaining = (targetIso: string | null) => {
-  if (!targetIso) return ''
-  const target = new Date(targetIso).getTime()
-  if (!Number.isFinite(target)) return ''
-  const diff = target - Date.now()
-  if (diff <= 0) return ''
-  const hours = Math.floor(diff / 3_600_000)
-  const minutes = Math.floor((diff % 3_600_000) / 60_000)
-  const seconds = Math.floor((diff % 60_000) / 1000)
-  return `${hours}時間${minutes.toString().padStart(2, '0')}分${seconds.toString().padStart(2, '0')}秒`
-}
-
-const normalizeErrorMessage = (value: unknown) => {
-  if (!value) return 'デイリーボーナスに失敗しました。'
-  if (typeof value === 'string') return value
-  if (value instanceof Error && value.message) return value.message
-  if (typeof value === 'object' && value) {
-    const maybe = value as { error?: unknown; message?: unknown; detail?: unknown }
-    const picked = maybe.error ?? maybe.message ?? maybe.detail
-    if (typeof picked === 'string' && picked) return picked
-  }
-  return 'デイリーボーナスに失敗しました。'
-}
-
 export function Purchase() {
   const [session, setSession] = useState<Session | null>(null)
   const [authStatus, setAuthStatus] = useState<'idle' | 'loading' | 'error'>('idle')
@@ -41,8 +17,6 @@ export function Purchase() {
   const [ticketMessage, setTicketMessage] = useState('')
   const [purchaseStatus, setPurchaseStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [purchaseMessage, setPurchaseMessage] = useState('')
-  const [dailyClaimStatus, setDailyClaimStatus] = useState<string | null>(null)
-  const [isClaimingDaily, setIsClaimingDaily] = useState(false)
 
   const accessToken = session?.access_token ?? ''
 
@@ -178,50 +152,6 @@ export function Purchase() {
     window.location.assign(data.url)
   }
 
-  const handleClaimDaily = async () => {
-    if (!accessToken || !session) {
-      setDailyClaimStatus('ログインしてください。')
-      return
-    }
-    if (isClaimingDaily) return
-    setIsClaimingDaily(true)
-    setDailyClaimStatus(null)
-    try {
-      const res = await fetch('/api/daily-bonus', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        const message = normalizeErrorMessage(data?.error ?? data?.message ?? data?.detail)
-        setDailyClaimStatus(message)
-        window.alert(message)
-        return
-      }
-      if (data?.granted) {
-        setDailyClaimStatus('無料トークンを付与しました。')
-        void fetchTickets(accessToken)
-      } else {
-        const reason = data?.reason
-        if (reason === 'cooldown' || reason === 'not_eligible_yet') {
-          const remain = formatRemaining(data?.next_eligible_at ?? null)
-          setDailyClaimStatus(remain ? `次の受け取りまで ${remain}` : 'まだ受け取れません。')
-        } else {
-          setDailyClaimStatus('まだ受け取れません。')
-        }
-      }
-    } catch (error) {
-      const message = normalizeErrorMessage(error)
-      setDailyClaimStatus(message)
-      window.alert(message)
-    } finally {
-      setIsClaimingDaily(false)
-    }
-  }
-
   return (
     <div className="camera-app purchase-app">
       <TopNav />
@@ -258,17 +188,6 @@ export function Purchase() {
               {ticketStatus === 'loading' && 'トークン確認中...'}
               {ticketStatus !== 'loading' && `トークン残り: ${ticketCount ?? 0}`}
               {ticketStatus === 'error' && ticketMessage ? ` / ${ticketMessage}` : ''}
-            </div>
-          )}
-          {session && (
-            <div className="daily-bonus">
-              <div className="daily-bonus__row">
-                <strong>無料トークン</strong>
-                <button type="button" className="ghost-button" onClick={handleClaimDaily} disabled={isClaimingDaily}>
-                  {isClaimingDaily ? '受け取り中...' : '受け取る'}
-                </button>
-              </div>
-              {dailyClaimStatus && <span>{dailyClaimStatus}</span>}
             </div>
           )}
         </section>

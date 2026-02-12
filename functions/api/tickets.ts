@@ -6,7 +6,7 @@ type Env = {
   SUPABASE_SERVICE_ROLE_KEY?: string
 }
 
-const SIGNUP_TICKET_GRANT = 3
+const SIGNUP_TICKET_GRANT = 5
 
 const corsMethods = 'GET, OPTIONS'
 

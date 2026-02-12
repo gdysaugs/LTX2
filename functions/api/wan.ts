@@ -51,7 +51,7 @@ type NodeMap = Partial<{
   end_step: NodeMapValue
 }>
 
-const SIGNUP_TICKET_GRANT = 3
+const SIGNUP_TICKET_GRANT = 5
 const VIDEO_TICKET_COST = 1
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_PROMPT_LENGTH = 100

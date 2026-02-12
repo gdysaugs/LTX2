@@ -573,29 +573,6 @@ body {
   color: var(--camera-muted);
 }
 
-.daily-bonus {
-  display: grid;
-  gap: 6px;
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid rgba(79, 70, 229, 0.2);
-  background: linear-gradient(140deg, rgba(79, 70, 229, 0.08), rgba(255, 255, 255, 0.95));
-  color: var(--camera-muted);
-  font-size: 0.85rem;
-}
-
-.daily-bonus__row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--camera-ink);
-}
-
-.daily-bonus strong {
-  font-size: 0.9rem;
-}
-
 .account-actions {
   display: flex;
   justify-content: flex-end;

@@ -26,7 +26,7 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
       </section>
 
       <section className="guest-minimal">
-        <p>今だけユーザー登録で3回無料生成</p>
+        <p>今だけユーザー登録で5回無料生成</p>
         <div className="guest-promo">
           <span>累計ユーザー7000人突破</span>
           <span>世界最先端のAIエンジン搭載</span>
@@ -132,7 +132,7 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
           <div className="guest-faq__item">
             <p className="guest-faq__q">Q. 必要なトークン数は？</p>
             <p className="guest-faq__a">
-              A. 動画1回の生成に1トークンを消費します。無料ユーザー登録で3トークン付与、さらに12時間ごとに1トークンをプレゼントします。
+              A. 動画1回の生成に1トークンを消費します。無料ユーザー登録で5トークン付与します。
             </p>
           </div>
           <div className="guest-faq__item">
