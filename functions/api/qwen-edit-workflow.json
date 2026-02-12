@@ -1,94 +1,141 @@
 {
   "1": {
-    "class_type": "UnetLoaderGGUF",
+    "class_type": "CheckpointLoaderSimple",
     "inputs": {
-      "unet_name": "qwen-image-edit-2511-Q4_K_M.gguf"
+      "ckpt_name": "Qwen/Qwen-Rapid-AIO-NSFW-v23.safetensors"
     },
     "_meta": {
-      "title": "Load UNet GGUF"
+      "title": "Load Checkpoint"
     }
   },
   "2": {
-    "class_type": "ModelSamplingAuraFlow",
+    "class_type": "KSampler",
     "inputs": {
       "model": [
         "1",
         0
       ],
-      "shift": 3
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "sa_solver",
+      "scheduler": "beta",
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "9",
+        0
+      ],
+      "denoise": 1
     },
     "_meta": {
-      "title": "ModelSamplingAuraFlow"
+      "title": "KSampler"
     }
   },
   "3": {
-    "class_type": "CLIPLoader",
+    "class_type": "TextEncodeQwenImageEditPlus",
     "inputs": {
-      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
-      "type": "stable_diffusion"
+      "clip": [
+        "1",
+        1
+      ],
+      "prompt": "",
+      "vae": [
+        "1",
+        2
+      ],
+      "image1": [
+        "7",
+        0
+      ],
+      "image2": [
+        "8",
+        0
+      ]
     },
     "_meta": {
-      "title": "CLIPLoader"
+      "title": "Prompt"
     }
   },
   "4": {
-    "class_type": "VAELoader",
+    "class_type": "TextEncodeQwenImageEditPlus",
     "inputs": {
-      "vae_name": "qwen_image_vae.safetensors"
+      "clip": [
+        "1",
+        1
+      ],
+      "prompt": "",
+      "vae": [
+        "1",
+        2
+      ],
+      "image1": [
+        "7",
+        0
+      ],
+      "image2": [
+        "8",
+        0
+      ]
     },
     "_meta": {
-      "title": "VAELoader"
+      "title": "Negative Prompt"
     }
   },
   "5": {
-    "class_type": "LoadImage",
+    "class_type": "VAEDecode",
     "inputs": {
-      "image": "input.png",
-      "upload": "image"
+      "samples": [
+        "2",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
     },
     "_meta": {
-      "title": "Input Image"
+      "title": "VAE Decode"
     }
   },
   "6": {
-    "class_type": "TextEncodeQwenImageEditPlus",
+    "class_type": "SaveImage",
     "inputs": {
-      "clip": [
-        "3",
-        0
-      ],
-      "vae": [
-        "4",
-        0
-      ],
-      "image1": [
+      "images": [
         "5",
         0
       ],
-      "prompt": ""
+      "filename_prefix": "Qwen_Rapid_AIO"
     },
     "_meta": {
-      "title": "TextEncodeQwenImageEditPlus Positive"
+      "title": "Save Image"
     }
   },
   "7": {
-    "class_type": "TextEncodeQwenImageEditPlus",
+    "class_type": "LoadImage",
     "inputs": {
-      "clip": [
-        "3",
-        0
-      ],
-      "vae": [
-        "4",
-        0
-      ],
-      "prompt": ""
+      "image": "input.png"
     },
     "_meta": {
-      "title": "TextEncodeQwenImageEditPlus Negative"
+      "title": "Load Image 1"
     }
   },
   "8": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "sub.png"
+    },
+    "_meta": {
+      "title": "Load Image 2"
+    }
+  },
+  "9": {
     "class_type": "EmptyLatentImage",
     "inputs": {
       "width": 768,
@@ -96,66 +143,7 @@
       "batch_size": 1
     },
     "_meta": {
-      "title": "EmptyLatentImage"
-    }
-  },
-  "9": {
-    "class_type": "KSampler",
-    "inputs": {
-      "model": [
-        "2",
-        0
-      ],
-      "positive": [
-        "6",
-        0
-      ],
-      "negative": [
-        "7",
-        0
-      ],
-      "latent_image": [
-        "8",
-        0
-      ],
-      "seed": 0,
-      "steps": 4,
-      "cfg": 1,
-      "sampler_name": "euler",
-      "scheduler": "simple",
-      "denoise": 1
-    },
-    "_meta": {
-      "title": "KSampler"
-    }
-  },
-  "10": {
-    "class_type": "VAEDecode",
-    "inputs": {
-      "samples": [
-        "9",
-        0
-      ],
-      "vae": [
-        "4",
-        0
-      ]
-    },
-    "_meta": {
-      "title": "VAEDecode"
-    }
-  },
-  "11": {
-    "class_type": "SaveImage",
-    "inputs": {
-      "images": [
-        "10",
-        0
-      ],
-      "filename_prefix": "ComfyUI"
-    },
-    "_meta": {
-      "title": "SaveImage"
+      "title": "Final Image Size"
     }
   }
 }

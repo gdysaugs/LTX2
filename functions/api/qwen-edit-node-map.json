@@ -1,10 +1,39 @@
 {
-  "image": { "id": "5", "input": "image" },
-  "prompt": { "id": "6", "input": "prompt" },
-  "negative_prompt": { "id": "7", "input": "prompt" },
-  "seed": { "id": "9", "input": "seed" },
-  "steps": { "id": "9", "input": "steps" },
-  "cfg": { "id": "9", "input": "cfg" },
-  "width": { "id": "8", "input": "width" },
-  "height": { "id": "8", "input": "height" }
+  "image": {
+    "id": "7",
+    "input": "image"
+  },
+  "image2": {
+    "id": "8",
+    "input": "image"
+  },
+  "prompt": {
+    "id": "3",
+    "input": "prompt"
+  },
+  "negative_prompt": {
+    "id": "4",
+    "input": "prompt"
+  },
+  "seed": {
+    "id": "2",
+    "input": "seed"
+  },
+  "steps": {
+    "id": "2",
+    "input": "steps"
+  },
+  "cfg": {
+    "id": "2",
+    "input": "cfg"
+  },
+  "width": {
+    "id": "9",
+    "input": "width"
+  },
+  "height": {
+    "id": "9",
+    "input": "height"
+  }
 }
+
