@@ -421,7 +421,11 @@ export function TextImage() {
     }
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: OAUTH_REDIRECT_URL, skipBrowserRedirect: true },
+      options: {
+        redirectTo: OAUTH_REDIRECT_URL,
+        skipBrowserRedirect: true,
+        queryParams: { prompt: 'select_account' },
+      },
     })
     if (error) {
       window.alert(error.message)
