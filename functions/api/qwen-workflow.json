@@ -39,10 +39,10 @@
         0
       ],
       "lora_name": "gp-zimage_000008000.safetensors",
-      "strength_model": 0.8
+      "strength_model": 0.7
     },
     "_meta": {
-      "title": "ZImage LoRA (0.8)"
+      "title": "ZImage LoRA (0.7)"
     }
   },
   "6": {
