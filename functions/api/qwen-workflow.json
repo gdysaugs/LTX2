@@ -2,7 +2,7 @@
   "16": {
     "class_type": "UnetLoaderGGUF",
     "inputs": {
-      "unet_name": "z-image-turbo-Q4_K_M.gguf"
+      "unet_name": "z_image_turbo-Q8_0.gguf"
     },
     "_meta": {
       "title": "Load UNet GGUF"
@@ -24,7 +24,7 @@
   "32": {
     "class_type": "CLIPLoaderGGUF",
     "inputs": {
-      "clip_name": "Qwen3-4B-UD-Q6_K_XL.gguf",
+      "clip_name": "Qwen3-4B-UD-Q5_K_XL.gguf",
       "type": "lumina2"
     },
     "_meta": {
