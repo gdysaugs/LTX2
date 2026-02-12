@@ -98,6 +98,16 @@ const normalizeErrorMessage = (value: unknown) => {
     if (value instanceof Error && value.message) return value.message
   }
   const raw = typeof value === 'string' ? value : value instanceof Error ? value.message : String(value)
+  const lowered = raw.toLowerCase()
+  if (
+    lowered.includes('out of memory') ||
+    lowered.includes('would exceed allowed memory') ||
+    lowered.includes('allocation on device') ||
+    lowered.includes('cuda') ||
+    lowered.includes('oom')
+  ) {
+    return '画像サイズエラーです。サイズの小さい画像で再生成してください。'
+  }
   const trimmed = raw.trim()
   if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
     try {
@@ -195,7 +205,7 @@ const fitWithinBounds = (width: number, height: number, maxWidth: number, maxHei
   return { width: targetWidth, height: targetHeight }
 }
 
-const getTargetSize = (width: number, height: number) => fitWithinBounds(width, height, 1344, 1344)
+const getTargetSize = (width: number, height: number) => fitWithinBounds(width, height, 1024, 1024)
 
 const buildPaddedDataUrl = (img: HTMLImageElement, targetWidth: number, targetHeight: number) => {
   const canvas = document.createElement('canvas')

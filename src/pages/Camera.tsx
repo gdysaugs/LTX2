@@ -125,6 +125,15 @@ const normalizeErrorMessage = (value: unknown) => {
   const raw = typeof value === 'string' ? value : value instanceof Error ? value.message : String(value)
   const lowered = raw.toLowerCase()
   if (
+    lowered.includes('out of memory') ||
+    lowered.includes('would exceed allowed memory') ||
+    lowered.includes('allocation on device') ||
+    lowered.includes('cuda') ||
+    lowered.includes('oom')
+  ) {
+    return '画像サイズエラーです。サイズの小さい画像で再生成してください。'
+  }
+  if (
     lowered.includes('underage') ||
     lowered.includes('minor') ||
     lowered.includes('child') ||

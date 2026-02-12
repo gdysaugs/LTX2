@@ -6,8 +6,10 @@ type GuestIntroProps = {
 const ASSETS = {
   logo: '/media/animone-logo.webp',
   headlineArt: '/media/fox-ai-banner-2.png',
-  howToSource: '/media/howto-source.jpg',
-  howToResult: '/media/howto-result.mp4',
+  howToSource1: '/media/howto-source-1.jpg',
+  howToResult1: '/media/howto-result-1.mp4',
+  howToSource2: '/media/howto-source-2.jpg',
+  howToResult2: '/media/howto-result-2.png',
 }
 
 export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
@@ -26,6 +28,7 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
       <section className="guest-minimal">
         <p>今だけユーザー登録で3回無料生成</p>
         <div className="guest-promo">
+          <span>累計ユーザー7000人突破</span>
           <span>世界最先端のAIエンジン搭載</span>
           <span>ユーザー満足度97%</span>
         </div>
@@ -38,13 +41,13 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
 
       <section className="guest-howto">
         <div className="guest-howto__header">
-          <h2>使い方</h2>
+          <h2>使い方（例1）</h2>
           <p>画像1枚とプロンプトだけで、すぐに動画化。</p>
         </div>
         <div className="guest-howto__flow">
           <div className="guest-howto__card">
             <p className="guest-howto__label">元画像</p>
-            <img src={ASSETS.howToSource} alt="元画像サンプル" loading="lazy" />
+            <img src={ASSETS.howToSource1} alt="元画像サンプル 1" loading="lazy" />
           </div>
           <div className="guest-howto__card guest-howto__card--prompt">
             <p className="guest-howto__label">入力プロンプト</p>
@@ -52,8 +55,68 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
           </div>
           <div className="guest-howto__card">
             <p className="guest-howto__label">生成結果</p>
-            <video src={ASSETS.howToResult} autoPlay loop muted playsInline preload="metadata" />
+            <video src={ASSETS.howToResult1} autoPlay loop muted playsInline preload="metadata" />
           </div>
+        </div>
+      </section>
+
+      <section className="guest-howto">
+        <div className="guest-howto__header">
+          <h2>使い方（例2）</h2>
+          <p>画像をアップロードして、指示した見た目に変換。</p>
+        </div>
+        <div className="guest-howto__flow">
+          <div className="guest-howto__card">
+            <p className="guest-howto__label">元画像</p>
+            <img src={ASSETS.howToSource2} alt="元画像サンプル 2" loading="lazy" />
+          </div>
+          <div className="guest-howto__card guest-howto__card--prompt">
+            <p className="guest-howto__label">入力プロンプト</p>
+            <p className="guest-howto__prompt">帽子をかぶって金髪にして</p>
+          </div>
+          <div className="guest-howto__card">
+            <p className="guest-howto__label">生成結果</p>
+            <img src={ASSETS.howToResult2} alt="生成結果サンプル 2" loading="lazy" />
+          </div>
+        </div>
+      </section>
+
+      <section className="guest-section guest-voices">
+        <div className="guest-section__header">
+          <h2>ユーザーの声</h2>
+          <p>さまざまな用途で活用されています。（※個人の感想です）</p>
+        </div>
+        <div className="guest-voices__list">
+          <article className="guest-voices__item">
+            <p className="guest-voices__text">
+              服選びで迷ったときに、自分の画像をアップして着せ替えできるので便利です。購入前のイメージ確認が早くなりました。
+            </p>
+            <p className="guest-voices__meta">20代 女性 / ファッション用途</p>
+          </article>
+          <article className="guest-voices__item">
+            <p className="guest-voices__text">
+              イラスト制作のラフ検証に使っています。プロンプトを少し変えるだけで複数案を比較できるので作業が進みやすいです。
+            </p>
+            <p className="guest-voices__meta">30代 男性 / イラスト用途</p>
+          </article>
+          <article className="guest-voices__item">
+            <p className="guest-voices__text">
+              広告バナーの方向性チェックに活用しています。撮影前に構図と雰囲気を確認できるので、企画会議が短くなりました。
+            </p>
+            <p className="guest-voices__meta">30代 女性 / 広告用途</p>
+          </article>
+          <article className="guest-voices__item">
+            <p className="guest-voices__text">
+              ECの商品画像のパターン出しに使っています。背景や小物を変えた案を短時間で作れるのが助かります。
+            </p>
+            <p className="guest-voices__meta">40代 男性 / EC用途</p>
+          </article>
+          <article className="guest-voices__item">
+            <p className="guest-voices__text">
+              SNSのショート動画素材づくりが簡単になりました。毎日投稿の準備時間を大きく減らせています。
+            </p>
+            <p className="guest-voices__meta">20代 男性 / 動画投稿用途</p>
+          </article>
         </div>
       </section>
 
