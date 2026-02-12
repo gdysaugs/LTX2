@@ -339,6 +339,7 @@ export function Image() {
   const submitImage = useCallback(
     async (payload: string, token: string) => {
       const input: Record<string, unknown> = {
+        variant: 'qwen_edit',
         prompt,
         negative_prompt: negativePrompt,
         image_base64: payload,
@@ -390,7 +391,7 @@ export function Image() {
       const headers: Record<string, string> = {}
       if (token) headers.Authorization = `Bearer ${token}`
       const res = await fetch(
-        `${API_ENDPOINT}?id=${encodeURIComponent(jobId)}&usage_id=${encodeURIComponent(usageId)}`,
+        `${API_ENDPOINT}?id=${encodeURIComponent(jobId)}&usage_id=${encodeURIComponent(usageId)}&variant=qwen_edit`,
         { headers },
       )
       const data = await res.json().catch(() => ({}))

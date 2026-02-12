@@ -1,0 +1,14 @@
+{
+  "image": [
+    { "id": "7", "input": "image" },
+    { "id": "8", "input": "image" }
+  ],
+  "prompt": { "id": "3", "input": "text" },
+  "negative_prompt": { "id": "4", "input": "text" },
+  "seed": { "id": "2", "input": "seed" },
+  "steps": { "id": "2", "input": "steps" },
+  "cfg": { "id": "2", "input": "cfg" },
+  "width": { "id": "9", "input": "width" },
+  "height": { "id": "9", "input": "height" }
+}
+

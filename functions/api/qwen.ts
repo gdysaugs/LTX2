@@ -1,5 +1,7 @@
-﻿import workflowTemplate from './qwen-workflow.json'
-import nodeMapTemplate from './qwen-node-map.json'
+﻿import zimageWorkflowTemplate from './qwen-workflow.json'
+import zimageNodeMapTemplate from './qwen-node-map.json'
+import qwenEditWorkflowTemplate from './qwen-edit-workflow.json'
+import qwenEditNodeMapTemplate from './qwen-edit-node-map.json'
 import { createClient, type User } from '@supabase/supabase-js'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
 import { isUnderageImage } from '../_shared/rekognition'
@@ -41,9 +43,24 @@ const normalizeEndpoint = (value?: string) => {
 }
 
 const DEFAULT_ZIMAGE_ENDPOINT = 'https://api.runpod.ai/v2/nk5f686wu3645s'
+const DEFAULT_QWEN_EDIT_ENDPOINT = 'https://api.runpod.ai/v2/278qoim6xsktcb'
 
-const resolveEndpoint = (env: Env) =>
-  normalizeEndpoint(env.RUNPOD_ZIMAGE_ENDPOINT_URL) || DEFAULT_ZIMAGE_ENDPOINT
+type WorkflowVariant = 'zimage' | 'qwen_edit'
+
+const resolveEndpoint = (env: Env, variant: WorkflowVariant) => {
+  if (variant === 'qwen_edit') {
+    return (
+      normalizeEndpoint(env.RUNPOD_QWEN_ENDPOINT_URL) ||
+      normalizeEndpoint(env.RUNPOD_ENDPOINT_URL) ||
+      DEFAULT_QWEN_EDIT_ENDPOINT
+    )
+  }
+  return (
+    normalizeEndpoint(env.RUNPOD_ZIMAGE_ENDPOINT_URL) ||
+    normalizeEndpoint(env.RUNPOD_ENDPOINT_URL) ||
+    DEFAULT_ZIMAGE_ENDPOINT
+  )
+}
 
 type NodeMapEntry = {
   id: string
@@ -78,9 +95,12 @@ const MIN_ANGLE_STRENGTH = 0
 const MAX_ANGLE_STRENGTH = 1
 const UNDERAGE_BLOCK_MESSAGE =
   'This image may contain violent, underage, or policy-violating content. Please try another image.'
-const getWorkflowTemplate = async () => workflowTemplate as Record<string, unknown>
 
-const getNodeMap = async () => nodeMapTemplate as NodeMap
+const getWorkflowTemplate = (variant: WorkflowVariant) =>
+  (variant === 'qwen_edit' ? qwenEditWorkflowTemplate : zimageWorkflowTemplate) as Record<string, unknown>
+
+const getNodeMap = (variant: WorkflowVariant) =>
+  (variant === 'qwen_edit' ? qwenEditNodeMapTemplate : zimageNodeMapTemplate) as NodeMap
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
@@ -137,6 +157,27 @@ const makeUsageId = () => {
     return crypto.randomUUID()
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+const normalizeVariant = (value: unknown): WorkflowVariant => {
+  const raw = typeof value === 'string' ? value : value == null ? '' : String(value)
+  const normalized = raw.trim().toLowerCase()
+  if (!normalized) return 'zimage'
+  if (normalized === 'qwen' || normalized === 'edit' || normalized === 'qwen_edit' || normalized === 'qwen-edit') {
+    return 'qwen_edit'
+  }
+  if (normalized.includes('qwen')) return 'qwen_edit'
+  return 'zimage'
+}
+
+const inferVariantFromUsageId = (usageId: string): WorkflowVariant => {
+  const normalized = String(usageId || '').trim().toLowerCase()
+  if (!normalized) return 'zimage'
+  if (normalized.startsWith('qwen_edit:') || normalized.startsWith('qwen-edit:')) return 'qwen_edit'
+  // Backward-compat: old IDs were prefixed with "qwen:" for edit jobs.
+  if (normalized.startsWith('qwen:')) return 'qwen_edit'
+  if (normalized.startsWith('zimage:') || normalized.startsWith('z:')) return 'zimage'
+  return 'zimage'
 }
 
 const fetchTicketRow = async (
@@ -553,6 +594,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url)
   const id = url.searchParams.get('id')
   const usageId = url.searchParams.get('usage_id') ?? url.searchParams.get('usageId') ?? ''
+  const variantParam = url.searchParams.get('variant') ?? ''
   if (!id) {
     return jsonResponse({ error: 'id is required.' }, 400, corsHeaders)
   }
@@ -563,10 +605,16 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     return jsonResponse({ error: 'RUNPOD_API_KEY is not set.' }, 500, corsHeaders)
   }
 
-  const endpoint = resolveEndpoint(env)
+  const variant = variantParam ? normalizeVariant(variantParam) : inferVariantFromUsageId(usageId)
+  const endpoint = resolveEndpoint(env, variant)
   if (!endpoint) {
     return jsonResponse(
-      { error: 'RUNPOD_ZIMAGE_ENDPOINT_URL is invalid or missing.' },
+      {
+        error:
+          variant === 'qwen_edit'
+            ? 'RUNPOD_QWEN_ENDPOINT_URL is invalid or missing.'
+            : 'RUNPOD_ZIMAGE_ENDPOINT_URL is invalid or missing.',
+      },
       500,
       corsHeaders,
     )
@@ -647,15 +695,6 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     return jsonResponse({ error: 'RUNPOD_API_KEY is not set.' }, 500, corsHeaders)
   }
 
-  const endpoint = resolveEndpoint(env)
-  if (!endpoint) {
-    return jsonResponse(
-      { error: 'RUNPOD_ZIMAGE_ENDPOINT_URL is invalid or missing.' },
-      500,
-      corsHeaders,
-    )
-  }
-
   const payload = await request.json().catch(() => null)
   if (!payload) {
     return jsonResponse({ error: 'Invalid request body.' }, 400, corsHeaders)
@@ -663,6 +702,23 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   const input = payload.input ?? payload
   const safeInput = typeof input === 'object' && input ? (input as Record<string, unknown>) : {}
+  const variant = normalizeVariant(
+    safeInput.variant ?? safeInput.engine ?? safeInput.model ?? safeInput.workflow_variant,
+  )
+
+  const endpoint = resolveEndpoint(env, variant)
+  if (!endpoint) {
+    return jsonResponse(
+      {
+        error:
+          variant === 'qwen_edit'
+            ? 'RUNPOD_QWEN_ENDPOINT_URL is invalid or missing.'
+            : 'RUNPOD_ZIMAGE_ENDPOINT_URL is invalid or missing.',
+      },
+      500,
+      corsHeaders,
+    )
+  }
   let imageBase64 = ''
   let subImageBase64Raw = ''
   try {
@@ -770,18 +826,18 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   let workflow: Record<string, unknown> | null = null
   let nodeMap: NodeMap | null = null
   if (useComfyUi) {
-    workflow = clone(await getWorkflowTemplate())
+    workflow = clone(getWorkflowTemplate(variant))
     if (!workflow || Object.keys(workflow).length === 0) {
       return jsonResponse({ error: 'workflow.json is empty. Export a ComfyUI API workflow.' }, 500, corsHeaders)
     }
-    nodeMap = await getNodeMap().catch(() => null)
+    nodeMap = getNodeMap(variant)
     const hasNodeMap = nodeMap && Object.keys(nodeMap).length > 0
     if (!hasNodeMap) {
       return jsonResponse({ error: 'node_map.json is empty.' }, 500, corsHeaders)
     }
   }
 
-  const usageId = `qwen:${makeUsageId()}`
+  const usageId = `${variant}:${makeUsageId()}`
   let ticketsLeft: number | null = null
   const ticketMetaWithUsage = {
     ...ticketMeta,
