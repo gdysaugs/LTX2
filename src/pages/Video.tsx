@@ -19,8 +19,8 @@ const API_ENDPOINT = '/api/anima'
 const IMAGE_TICKET_COST = 1
 
 // Anima recommended defaults.
-const FIXED_STEPS = 40
-const FIXED_CFG = 5.5
+const FIXED_STEPS = 35
+const FIXED_CFG = 4.5
 const FIXED_WIDTH = 1024
 const FIXED_HEIGHT = 1024
 
@@ -170,8 +170,22 @@ const extractImageList = (payload: any) => {
 const extractJobId = (payload: any) => payload?.id || payload?.jobId || payload?.job_id || payload?.output?.id
 
 export function Video() {
-  const [prompt, setPrompt] = useState('')
-  const [negativePrompt, setNegativePrompt] = useState('')
+  const [prompt, setPrompt] = useState(
+    [
+      'masterpiece',
+      'best quality',
+      'good quality',
+      'highres',
+      'score_9, score_8',
+      'newest',
+      'recent',
+      'detailed',
+      'high detail',
+    ].join(', '),
+  )
+  const [negativePrompt, setNegativePrompt] = useState(
+    'worst quality, low quality, blurry, jpeg artifacts, text, watermark, logo, bad hands, extra fingers, deformed, bad anatomy',
+  )
   const [result, setResult] = useState<RenderResult | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)

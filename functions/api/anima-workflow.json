@@ -99,8 +99,8 @@
         0
       ],
       "seed": 0,
-      "steps": 40,
-      "cfg": 5.5,
+      "steps": 35,
+      "cfg": 4.5,
       "sampler_name": "euler_ancestral",
       "scheduler": "simple",
       "denoise": 1

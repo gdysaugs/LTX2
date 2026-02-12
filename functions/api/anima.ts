@@ -369,8 +369,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const input = payload.input ?? payload
   const prompt = String(input?.prompt ?? input?.text ?? '')
   const negativePrompt = String(input?.negative_prompt ?? input?.negative ?? '')
-  const steps = Math.floor(Number(input?.steps ?? input?.num_inference_steps ?? 40))
-  const cfg = Number(input?.cfg ?? input?.guidance_scale ?? 5.5)
+  const steps = Math.floor(Number(input?.steps ?? input?.num_inference_steps ?? 35))
+  const cfg = Number(input?.cfg ?? input?.guidance_scale ?? 4.5)
   const width = Math.floor(Number(input?.width ?? 1024))
   const height = Math.floor(Number(input?.height ?? 1024))
   const seed = input?.randomize_seed ? Math.floor(Math.random() * 2147483647) : Number(input?.seed ?? 0)
