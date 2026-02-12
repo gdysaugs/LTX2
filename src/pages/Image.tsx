@@ -275,18 +275,30 @@ export function Image() {
 
   useEffect(() => {
     if (!supabase) return
-    const hasCode = typeof window !== 'undefined' && window.location.search.includes('code=')
-    const hasState = typeof window !== 'undefined' && window.location.search.includes('state=')
+    const url = new URL(window.location.href)
+    const oauthError = url.searchParams.get('error_description') || url.searchParams.get('error')
+    if (oauthError) {
+      console.error('OAuth callback error', oauthError)
+      window.alert('ログインに失敗しました。もう一度お試しください。')
+      url.searchParams.delete('error')
+      url.searchParams.delete('error_description')
+      window.history.replaceState({}, document.title, url.toString())
+      return
+    }
+    const hasCode = url.searchParams.has('code')
+    const hasState = url.searchParams.has('state')
     if (!hasCode || !hasState) return
     supabase.auth.exchangeCodeForSession(window.location.href).then(({ error }) => {
       if (error) {
-        setStatusMessage(error.message)
+        console.error('exchangeCodeForSession failed', error)
+        window.alert('ログインに失敗しました。もう一度お試しください。')
+        setStatusMessage('ログインに失敗しました。もう一度お試しください。')
         return
       }
-      const url = new URL(window.location.href)
-      url.searchParams.delete('code')
-      url.searchParams.delete('state')
-      window.history.replaceState({}, document.title, url.toString())
+      const cleaned = new URL(window.location.href)
+      cleaned.searchParams.delete('code')
+      cleaned.searchParams.delete('state')
+      window.history.replaceState({}, document.title, cleaned.toString())
     })
   }, [])
 
@@ -482,7 +494,7 @@ export function Image() {
     }
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: OAUTH_REDIRECT_URL, skipBrowserRedirect: true },
+      options: { redirectTo: OAUTH_REDIRECT_URL, queryParams: { prompt: 'select_account' } },
     })
     if (error) {
       window.alert(error.message)
