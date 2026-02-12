@@ -470,15 +470,27 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     )
   }
 
+  const ticketsLeft = Number((ticketCharge as { ticketsLeft?: unknown }).ticketsLeft)
+
+  // Always include usage_id so the frontend can poll status reliably.
   if (upstreamPayload && typeof upstreamPayload === 'object') {
-    upstreamPayload.usage_id = usageId
-    const ticketsLeft = Number((ticketCharge as { ticketsLeft?: unknown }).ticketsLeft)
-    if (Number.isFinite(ticketsLeft)) upstreamPayload.ticketsLeft = ticketsLeft
+    const payloadWithMeta = {
+      ...upstreamPayload,
+      usage_id: usageId,
+      ...(Number.isFinite(ticketsLeft) ? { ticketsLeft } : {}),
+    }
+    return jsonResponse(payloadWithMeta, upstream.status, corsHeaders)
   }
 
-  return new Response(raw, {
-    status: upstream.status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  })
+  // Upstream returned a non-JSON body; return a minimal JSON wrapper.
+  return jsonResponse(
+    {
+      status: upstream.status,
+      usage_id: usageId,
+      ...(Number.isFinite(ticketsLeft) ? { ticketsLeft } : {}),
+      error: upstream.ok ? 'Upstream response was not JSON.' : 'Upstream request failed.',
+    },
+    upstream.ok ? 502 : upstream.status,
+    corsHeaders,
+  )
 }
-
