@@ -60,10 +60,9 @@ const requireGoogleUser = async (request: Request, env: Env, corsHeaders: Header
 }
 
 const PRICE_MAP = new Map([
-  ['price_1Sy5N6Abw0uHQjne0Q6aV0M1', { label: 'Starter', tickets: 20 }],
-  ['price_1Sy5QbAbw0uHQjne0wydR1AG', { label: 'Basic', tickets: 80 }],
-  ['price_1Sy5QqAbw0uHQjneTnEIOCFx', { label: 'Plus', tickets: 200 }],
-  ['price_1Sy5R3Abw0uHQjnekmxX7Q5n', { label: 'Pro', tickets: 500 }],
+  ['price_1T0FbRADIkb9D0vbJU219i32', { label: 'ミニパック', tickets: 30 }],
+  ['price_1T0FcJADIkb9D0vbswnpncgW', { label: 'お得パック', tickets: 80 }],
+  ['price_1T0Ff0ADIkb9D0vbdH1cayHz', { label: '大容量パック', tickets: 200 }],
 ])
 
 const getRedirectUrl = (env: Env, request: Request, key: 'STRIPE_SUCCESS_URL' | 'STRIPE_CANCEL_URL', fallback: string) =>
@@ -123,8 +122,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   params.set('metadata[tickets]', String(plan.tickets))
   params.set('metadata[price_id]', priceId)
   params.set('metadata[plan_label]', plan.label)
-  params.set('metadata[app]', 'animone')
-  params.set('payment_intent_data[statement_descriptor]', 'ANIMONE')
+  params.set('metadata[app]', 'meltai')
+  params.set('payment_intent_data[statement_descriptor]', 'MELTAI')
 
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
