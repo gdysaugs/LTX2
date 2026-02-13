@@ -24,12 +24,15 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
             プロンプトを入力して、すぐに結果を確認できます。
           </p>
           <div className="melt-hero__stats">
-            <span>累計ユーザー 7,000+</span>
-            <span>登録で5回無料</span>
+            <span>全世界ユーザー 50,000+</span>
+            <span>今すぐ登録で5回無料</span>
             <span>高速生成エンジン</span>
+            <span>神絵師イラストを誰でも</span>
+            <span>絵師スタイル自由自在</span>
+            <span>超リアルな実写生成</span>
           </div>
           <div className="melt-hero__actions">
-            <button type="button" className="primary-button primary-button--shimmer" onClick={onSignIn}>
+            <button type="button" className="primary-button primary-button--pulse" onClick={onSignIn}>
               登録 / ログイン
             </button>
           </div>
