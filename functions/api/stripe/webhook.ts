@@ -6,10 +6,21 @@ type Env = {
   STRIPE_WEBHOOK_SECRET?: string
 }
 
-const MELTAI_PRICE_IDS = new Set([
+// Accept both the old and new identifiers so previously-created Checkout Sessions
+// (before the rebrand/price swap deploy) can still be granted by retrying the webhook.
+const ACCEPTED_APP_TAGS = new Set(['meltai', 'animone'])
+
+const ACCEPTED_PRICE_IDS = new Set([
+  // New plans
   'price_1T0FbRADIkb9D0vbJU219i32', // ミニパック
   'price_1T0FcJADIkb9D0vbswnpncgW', // お得パック
   'price_1T0Ff0ADIkb9D0vbdH1cayHz', // 大容量パック
+
+  // Legacy plans (keep to allow backfilling older sessions)
+  'price_1Sy5N6Abw0uHQjne0Q6aV0M1', // Starter
+  'price_1Sy5QbAbw0uHQjne0wydR1AG', // Basic
+  'price_1Sy5QqAbw0uHQjneTnEIOCFx', // Plus
+  'price_1Sy5R3Abw0uHQjnekmxX7Q5n', // Pro
 ])
 
 const corsHeaders = {
@@ -98,12 +109,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const appTag = String(session.metadata?.app ?? '')
-  if (appTag !== 'meltai') {
+  if (!ACCEPTED_APP_TAGS.has(appTag)) {
     return jsonResponse({ received: true })
   }
 
   const priceId = String(session.metadata?.price_id ?? '')
-  if (!priceId || !MELTAI_PRICE_IDS.has(priceId)) {
+  if (!priceId || !ACCEPTED_PRICE_IDS.has(priceId)) {
     return jsonResponse({ received: true })
   }
 
