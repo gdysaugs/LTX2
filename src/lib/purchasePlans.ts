@@ -7,8 +7,7 @@ export type PurchasePlan = {
 }
 
 export const PURCHASE_PLANS: PurchasePlan[] = [
-  { id: 'starter', label: 'Starter', price: 600, tickets: 20, priceId: 'price_1Sy5N6Abw0uHQjne0Q6aV0M1' },
-  { id: 'basic', label: 'Basic', price: 2000, tickets: 80, priceId: 'price_1Sy5QbAbw0uHQjne0wydR1AG' },
-  { id: 'plus', label: 'Plus', price: 4000, tickets: 200, priceId: 'price_1Sy5QqAbw0uHQjneTnEIOCFx' },
-  { id: 'pro', label: 'Pro', price: 9000, tickets: 500, priceId: 'price_1Sy5R3Abw0uHQjnekmxX7Q5n' },
+  { id: 'mini', label: 'ミニパック', price: 480, tickets: 30, priceId: 'price_1T0FbRADIkb9D0vbJU219i32' },
+  { id: 'value', label: 'お得パック', price: 1200, tickets: 80, priceId: 'price_1T0FcJADIkb9D0vbswnpncgW' },
+  { id: 'bulk', label: '大容量パック', price: 2800, tickets: 200, priceId: 'price_1T0Ff0ADIkb9D0vbdH1cayHz' },
 ]
