@@ -51,6 +51,9 @@ type NodeMap = Partial<{
   seed: NodeMapValue
   steps: NodeMapValue
   cfg: NodeMapValue
+  sampler_name: NodeMapValue
+  scheduler: NodeMapValue
+  denoise: NodeMapValue
   width: NodeMapValue
   height: NodeMapValue
 }>
@@ -64,6 +67,46 @@ const MIN_CFG = 0
 const MAX_CFG = 10
 const MIN_STEPS = 1
 const MAX_STEPS = 60
+const MIN_DENOISE = 0
+const MAX_DENOISE = 1
+const DEFAULT_DENOISE = 1
+const DEFAULT_SAMPLER_NAME = 'er_sde'
+const DEFAULT_SCHEDULER = 'simple'
+
+const ALLOWED_SAMPLERS = new Set([
+  'er_sde',
+  'euler',
+  'euler_cfg_pp',
+  'euler_ancestral',
+  'euler_ancestral_cfg_pp',
+  'heun',
+  'heunpp2',
+  'dpm_2',
+  'dpm_2_ancestral',
+  'lms',
+  'dpm_fast',
+  'dpm_adaptive',
+  'dpmpp_2s_ancestral',
+  'dpmpp_2s_ancestral_cfg_pp',
+  'dpmpp_sde',
+  'dpmpp_sde_gpu',
+  'dpmpp_2m',
+  'dpmpp_2m_cfg_pp',
+  'dpmpp_2m_sde',
+  'dpmpp_2m_sde_gpu',
+  'dpmpp_3m_sde',
+  'dpmpp_3m_sde_gpu',
+  'ddpm',
+  'lcm',
+  'ipndm',
+  'ipndm_v',
+  'deis',
+  'ddim',
+  'uni_pc',
+  'uni_pc_bh2',
+])
+
+const ALLOWED_SCHEDULERS = new Set(['simple', 'normal', 'karras', 'exponential', 'sgm_uniform', 'ddim_uniform', 'beta'])
 
 const getWorkflowTemplate = async () => workflowTemplate as Record<string, unknown>
 const getNodeMap = async () => nodeMapTemplate as NodeMap
@@ -373,7 +416,16 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const cfg = Number(input?.cfg ?? input?.guidance_scale ?? 4.5)
   const width = Math.floor(Number(input?.width ?? 1024))
   const height = Math.floor(Number(input?.height ?? 1024))
-  const seed = input?.randomize_seed ? Math.floor(Math.random() * 2147483647) : Number(input?.seed ?? 0)
+  const randomizeSeed = Boolean(input?.randomize_seed ?? false)
+  const seedInput = Math.floor(Number(input?.seed ?? 0))
+  const seed = randomizeSeed ? Math.floor(Math.random() * 2147483647) : seedInput
+  const samplerName = String(input?.sampler_name ?? input?.sampler ?? DEFAULT_SAMPLER_NAME)
+    .trim()
+    .toLowerCase()
+  const scheduler = String(input?.scheduler ?? DEFAULT_SCHEDULER)
+    .trim()
+    .toLowerCase()
+  const denoise = Number(input?.denoise ?? DEFAULT_DENOISE)
 
   if (prompt.length > MAX_PROMPT_LENGTH) return jsonResponse({ error: 'プロンプトが長すぎます。' }, 400, corsHeaders)
   if (negativePrompt.length > MAX_NEGATIVE_PROMPT_LENGTH) {
@@ -391,6 +443,18 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   if (!Number.isFinite(steps) || steps < MIN_STEPS || steps > MAX_STEPS) {
     return jsonResponse({ error: `steps must be between ${MIN_STEPS} and ${MAX_STEPS}.` }, 400, corsHeaders)
   }
+  if (!Number.isFinite(seed) || seed < 0 || seed > 2147483647) {
+    return jsonResponse({ error: 'seed must be between 0 and 2147483647.' }, 400, corsHeaders)
+  }
+  if (!Number.isFinite(denoise) || denoise < MIN_DENOISE || denoise > MAX_DENOISE) {
+    return jsonResponse({ error: `denoise must be between ${MIN_DENOISE} and ${MAX_DENOISE}.` }, 400, corsHeaders)
+  }
+  if (!ALLOWED_SAMPLERS.has(samplerName)) {
+    return jsonResponse({ error: 'sampler_name is invalid.' }, 400, corsHeaders)
+  }
+  if (!ALLOWED_SCHEDULERS.has(scheduler)) {
+    return jsonResponse({ error: 'scheduler is invalid.' }, 400, corsHeaders)
+  }
 
   const ticketCheck = await ensureTicketAvailable(auth.admin, auth.user, corsHeaders)
   if ('response' in ticketCheck) return ticketCheck.response
@@ -399,7 +463,18 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const ticketCharge = await consumeTicket(
     auth.admin,
     auth.user,
-    { usage_id: usageId, width, height, steps, cfg, prompt_length: prompt.length, source: 'run' },
+    {
+      usage_id: usageId,
+      width,
+      height,
+      steps,
+      cfg,
+      sampler_name: samplerName,
+      scheduler,
+      denoise,
+      prompt_length: prompt.length,
+      source: 'run',
+    },
     usageId,
     corsHeaders,
   )
@@ -414,6 +489,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       seed,
       steps,
       cfg,
+      sampler_name: samplerName,
+      scheduler,
+      denoise,
       width,
       height,
     })

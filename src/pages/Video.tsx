@@ -23,6 +23,22 @@ const FIXED_STEPS = 45
 const FIXED_CFG = 4.5
 const FIXED_WIDTH = 1024
 const FIXED_HEIGHT = 1024
+const DEFAULT_DENOISE = 1
+const DEFAULT_SAMPLER = 'er_sde'
+const DEFAULT_SCHEDULER = 'simple'
+
+const SAMPLER_OPTIONS = [
+  'er_sde',
+  'euler',
+  'euler_ancestral',
+  'dpmpp_2m',
+  'dpmpp_sde',
+  'dpmpp_2m_sde',
+  'ddim',
+  'lcm',
+]
+
+const SCHEDULER_OPTIONS = ['simple', 'normal', 'karras', 'sgm_uniform', 'exponential', 'ddim_uniform', 'beta']
 
 const OAUTH_REDIRECT_URL = getOAuthRedirectUrl()
 
@@ -186,6 +202,13 @@ export function Video() {
   const [negativePrompt, setNegativePrompt] = useState(
     'worst quality, low quality, blurry, jpeg artifacts, text, watermark, logo, bad hands, extra fingers, deformed, bad anatomy',
   )
+  const [steps, setSteps] = useState(FIXED_STEPS)
+  const [cfg, setCfg] = useState(FIXED_CFG)
+  const [samplerName, setSamplerName] = useState(DEFAULT_SAMPLER)
+  const [scheduler, setScheduler] = useState(DEFAULT_SCHEDULER)
+  const [denoise, setDenoise] = useState(DEFAULT_DENOISE)
+  const [randomizeSeed, setRandomizeSeed] = useState(true)
+  const [seed, setSeed] = useState(0)
   const [result, setResult] = useState<RenderResult | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)
@@ -297,10 +320,13 @@ export function Video() {
         negative_prompt: negativePrompt,
         width: FIXED_WIDTH,
         height: FIXED_HEIGHT,
-        steps: FIXED_STEPS,
-        cfg: FIXED_CFG,
-        seed: 0,
-        randomize_seed: true,
+        steps,
+        cfg,
+        seed,
+        randomize_seed: randomizeSeed,
+        sampler_name: samplerName,
+        scheduler,
+        denoise,
       }
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (token) headers.Authorization = 'Bearer ' + token
@@ -331,7 +357,7 @@ export function Video() {
       if (!usageId) throw new Error('usage_id の取得に失敗しました。')
       return { jobId, usageId }
     },
-    [negativePrompt, prompt],
+    [cfg, denoise, negativePrompt, prompt, randomizeSeed, samplerName, scheduler, seed, steps],
   )
 
   const pollJob = useCallback(async (jobId: string, usageId: string, runId: number, token?: string) => {
@@ -536,6 +562,92 @@ export function Video() {
                 placeholder='任意: 避けたい内容を入力。'
               />
             </label>
+
+            <div className='wizard-section'>
+              <p className='wizard-eyebrow'>詳細パラメータ</p>
+              <div className='wizard-params-grid'>
+                <label className='wizard-field'>
+                  <span>Steps (1-60)</span>
+                  <input
+                    type='number'
+                    min={1}
+                    max={60}
+                    step={1}
+                    value={steps}
+                    onChange={(e) => setSteps(Math.floor(Number(e.target.value || 1)))}
+                  />
+                </label>
+
+                <label className='wizard-field'>
+                  <span>CFG (0-10)</span>
+                  <input
+                    type='number'
+                    min={0}
+                    max={10}
+                    step={0.1}
+                    value={cfg}
+                    onChange={(e) => setCfg(Number(e.target.value || 0))}
+                  />
+                </label>
+
+                <label className='wizard-field'>
+                  <span>Sampler</span>
+                  <select value={samplerName} onChange={(e) => setSamplerName(e.target.value)}>
+                    {SAMPLER_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className='wizard-field'>
+                  <span>Scheduler</span>
+                  <select value={scheduler} onChange={(e) => setScheduler(e.target.value)}>
+                    {SCHEDULER_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className='wizard-field'>
+                  <span>Denoise (0-1)</span>
+                  <input
+                    type='number'
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={denoise}
+                    onChange={(e) => setDenoise(Number(e.target.value || 0))}
+                  />
+                </label>
+
+                <label className='wizard-field'>
+                  <span>Seed</span>
+                  <input
+                    type='number'
+                    min={0}
+                    step={1}
+                    value={seed}
+                    onChange={(e) => setSeed(Math.floor(Number(e.target.value || 0)))}
+                    disabled={randomizeSeed}
+                  />
+                </label>
+              </div>
+
+              <label className='wizard-field'>
+                <span>Seed mode</span>
+                <select
+                  value={randomizeSeed ? 'random' : 'fixed'}
+                  onChange={(e) => setRandomizeSeed(e.target.value === 'random')}
+                >
+                  <option value='random'>毎回ランダム</option>
+                  <option value='fixed'>固定seedを使う</option>
+                </select>
+              </label>
+            </div>
 
             <div className='wizard-actions'>
               <button type='button' className='primary-button' onClick={handleGenerate} disabled={isRunning || !canGenerate}>

@@ -7,6 +7,7 @@ type Env = {
   RUNPOD_API_KEY?: string
   RUNPOD_ENDPOINT_URL?: string
   RUNPOD_WAV2LIP_ENDPOINT_URL?: string
+  R2_BUCKET?: string
   SUPABASE_URL?: string
   SUPABASE_SERVICE_ROLE_KEY?: string
 }
@@ -27,9 +28,13 @@ type RunpodStatusResponse = {
   [key: string]: unknown
 }
 
-const corsMethods = 'POST, GET, OPTIONS'
+const corsMethods = 'POST, GET, DELETE, OPTIONS'
 const SIGNUP_TICKET_GRANT = 5
 const VOICE_TICKET_COST = 1
+const MAX_VIDEO_SIZE_BYTES = 200 * 1024 * 1024
+const MAX_AUDIO_SIZE_BYTES = 50 * 1024 * 1024
+const DEFAULT_R2_BUCKET = 'wav2lipsovits'
+const R2_HOST_SUFFIX = '.r2.cloudflarestorage.com'
 
 const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(body), {
@@ -222,12 +227,27 @@ const refundTicket = async (
   const email = user.email
   if (!email || !usageId) return { skipped: true }
 
-  const { data: chargeEvent, error: chargeError } = await admin
+  let chargeEvent: { usage_id?: string } | null = null
+  const { data: chargeByUser, error: chargeByUserError } = await admin
     .from('ticket_events')
     .select('usage_id')
     .eq('usage_id', usageId)
+    .eq('user_id', user.id)
     .maybeSingle()
-  if (chargeError) return { response: jsonResponse({ error: chargeError.message }, 500, corsHeaders) }
+  if (chargeByUserError) return { response: jsonResponse({ error: chargeByUserError.message }, 500, corsHeaders) }
+  chargeEvent = chargeByUser
+
+  if (!chargeEvent) {
+    const { data: chargeByEmail, error: chargeByEmailError } = await admin
+      .from('ticket_events')
+      .select('usage_id')
+      .eq('usage_id', usageId)
+      .eq('email', email)
+      .maybeSingle()
+    if (chargeByEmailError) return { response: jsonResponse({ error: chargeByEmailError.message }, 500, corsHeaders) }
+    chargeEvent = chargeByEmail
+  }
+
   if (!chargeEvent) return { skipped: true }
 
   const refundUsageId = `${usageId}:refund`
@@ -270,6 +290,102 @@ const parseNumber = (value: FormDataEntryValue | null) => {
   return Number.isFinite(num) ? num : null
 }
 
+
+type ParsedR2Url = {
+  bucket: string
+  key: string
+}
+
+const parseR2ObjectUrl = (rawUrl: string, env: Env): ParsedR2Url | null => {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== 'https:') return null
+    const hostname = parsed.hostname.toLowerCase()
+    if (!hostname.endsWith(R2_HOST_SUFFIX)) return null
+
+    const pathParts = parsed.pathname.split('/').filter(Boolean)
+    if (pathParts.length < 2) return null
+
+    const bucket = pathParts[0]
+    const key = pathParts.slice(1).join('/')
+    const expectedBucket = (env.R2_BUCKET || DEFAULT_R2_BUCKET).trim()
+    if (expectedBucket && bucket !== expectedBucket) return null
+    return { bucket, key }
+  } catch {
+    return null
+  }
+}
+
+const hasAllowedR2Prefix = (parsed: ParsedR2Url, prefixes: string[]) =>
+  prefixes.some((prefix) => parsed.key.startsWith(prefix))
+
+const parseTotalBytesFromHeaders = (headers: Headers) => {
+  const contentRange = headers.get('content-range') || ''
+  const rangeMatch = contentRange.match(/\/(\d+)\s*$/)
+  if (rangeMatch) {
+    const totalFromRange = Number(rangeMatch[1])
+    if (Number.isFinite(totalFromRange) && totalFromRange >= 0) return totalFromRange
+  }
+
+  const contentLength = headers.get('content-length') || ''
+  const totalFromLength = Number(contentLength)
+  if (Number.isFinite(totalFromLength) && totalFromLength >= 0) return totalFromLength
+  return null
+}
+
+const probeRemoteFileSize = async (rawUrl: string) => {
+  const rangeRes = await fetch(rawUrl, {
+    method: 'GET',
+    headers: { Range: 'bytes=0-0' },
+  })
+  try {
+    if (rangeRes.ok || rangeRes.status === 206 || rangeRes.status === 416) {
+      const total = parseTotalBytesFromHeaders(rangeRes.headers)
+      if (total !== null) return total
+    }
+  } finally {
+    await rangeRes.body?.cancel().catch(() => undefined)
+  }
+
+  const headRes = await fetch(rawUrl, { method: 'HEAD' })
+  try {
+    if (headRes.ok) {
+      const total = parseTotalBytesFromHeaders(headRes.headers)
+      if (total !== null) return total
+    }
+  } finally {
+    await headRes.body?.cancel().catch(() => undefined)
+  }
+
+  return null
+}
+
+const ensureRemoteFileSizeWithinLimit = async (
+  rawUrl: string,
+  maxBytes: number,
+  label: string,
+  corsHeaders: HeadersInit,
+) => {
+  let totalBytes: number | null = null
+  try {
+    totalBytes = await probeRemoteFileSize(rawUrl)
+  } catch {
+    return { response: jsonResponse({ error: `${label}のサイズ確認に失敗しました。` }, 400, corsHeaders) }
+  }
+
+  if (totalBytes === null) {
+    return { response: jsonResponse({ error: `${label}のサイズ確認に失敗しました。` }, 400, corsHeaders) }
+  }
+
+  if (totalBytes > maxBytes) {
+    const maxMb = Math.floor(maxBytes / (1024 * 1024))
+    return { response: jsonResponse({ error: `${label}サイズは最大${maxMb}MBまでです。` }, 400, corsHeaders) }
+  }
+
+  return { size: totalBytes }
+}
+
+const waitMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const runpodFetch = async (endpoint: string, apiKey: string, path: string, init?: RequestInit) => {
   const headers = new Headers(init?.headers)
   headers.set('Authorization', `Bearer ${apiKey}`)
@@ -343,6 +459,76 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   }
 }
 
+export const onRequestDelete: PagesFunction<Env> = async ({ request, env }) => {
+  const corsHeaders = buildCorsHeaders(request, env, corsMethods)
+  if (isCorsBlocked(request, env)) {
+    return new Response(null, { status: 403, headers: corsHeaders })
+  }
+
+  const auth = await requireGoogleUser(request, env, corsHeaders)
+  if ('response' in auth) return auth.response
+
+  const endpoint = resolveEndpoint(env)
+  if (!endpoint) return jsonResponse({ error: 'RUNPOD_WAV2LIP_ENDPOINT_URL が未設定です。' }, 500, corsHeaders)
+  if (!env.RUNPOD_API_KEY) return jsonResponse({ error: 'RUNPOD_API_KEY が未設定です。' }, 500, corsHeaders)
+
+  const url = new URL(request.url)
+  const id = (url.searchParams.get('id') || '').trim()
+  const usageId = (url.searchParams.get('usage_id') || url.searchParams.get('usageId') || '').trim() || null
+  if (!id) return jsonResponse({ error: 'id is required.' }, 400, corsHeaders)
+
+  let cancelAccepted = false
+  try {
+    const cancelRes = await runpodFetch(endpoint, env.RUNPOD_API_KEY, `/cancel/${encodeURIComponent(id)}`, { method: 'POST' })
+    cancelAccepted = cancelRes.ok
+  } catch {
+    cancelAccepted = false
+  }
+
+  let latestStatus = ''
+  let shouldRefund = false
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      const stRes = await runpodFetch(endpoint, env.RUNPOD_API_KEY, `/status/${encodeURIComponent(id)}`, { method: 'GET' })
+      const raw = await stRes.text()
+      const payload = (JSON.parse(raw || '{}') as RunpodStatusResponse) || {}
+      latestStatus = String(payload?.status || '').toUpperCase()
+      if (isFailurePayload(payload)) {
+        shouldRefund = true
+        break
+      }
+      const normalized = latestStatus.toLowerCase()
+      if (normalized.includes('complete') || normalized.includes('success')) {
+        shouldRefund = false
+        break
+      }
+    } catch {
+      // ignore transient errors while polling cancellation result
+    }
+    await waitMs(1500)
+  }
+
+  let refundedTickets: number | undefined
+  if (usageId && shouldRefund) {
+    const refund = await refundTicket(auth.admin, auth.user, { usage_id: usageId, job_id: id, source: 'cancel' }, usageId, corsHeaders)
+    if ('response' in refund) return refund.response
+    refundedTickets = refund.ticketsLeft
+  }
+
+  return jsonResponse(
+    {
+      id,
+      usage_id: usageId,
+      cancelAccepted,
+      status: latestStatus || 'UNKNOWN',
+      refunded: Number.isFinite(refundedTickets),
+      ticketsLeft: refundedTickets,
+    },
+    200,
+    corsHeaders,
+  )
+}
+
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const corsHeaders = buildCorsHeaders(request, env, corsMethods)
   if (isCorsBlocked(request, env)) {
@@ -355,6 +541,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const endpoint = resolveEndpoint(env)
   if (!endpoint) return jsonResponse({ error: 'RUNPOD_WAV2LIP_ENDPOINT_URL が未設定です。' }, 500, corsHeaders)
   if (!env.RUNPOD_API_KEY) return jsonResponse({ error: 'RUNPOD_API_KEY が未設定です。' }, 500, corsHeaders)
+
+  let usageId: string | null = null
 
   try {
     const form = await request.formData()
@@ -369,10 +557,36 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       return jsonResponse({ error: 'video/audio are required (files or video_url/audio_url).' }, 400, corsHeaders)
     }
 
+    if (hasFiles) {
+      const inputVideo = videoFile as File
+      const inputAudio = audioFile as File
+      if (inputVideo.size > MAX_VIDEO_SIZE_BYTES) {
+        return jsonResponse({ error: '動画サイズは最大200MBまでです。' }, 400, corsHeaders)
+      }
+      if (inputAudio.size > MAX_AUDIO_SIZE_BYTES) {
+        return jsonResponse({ error: '音声サイズは最大50MBまでです。' }, 400, corsHeaders)
+      }
+    } else {
+      const parsedVideo = parseR2ObjectUrl(videoUrl, env)
+      const parsedAudio = parseR2ObjectUrl(audioUrl, env)
+      if (!parsedVideo || !hasAllowedR2Prefix(parsedVideo, ['wav2lip/video/'])) {
+        return jsonResponse({ error: 'video_url は許可されていないURLです。' }, 400, corsHeaders)
+      }
+      if (!parsedAudio || !hasAllowedR2Prefix(parsedAudio, ['wav2lip/audio/'])) {
+        return jsonResponse({ error: 'audio_url は許可されていないURLです。' }, 400, corsHeaders)
+      }
+
+      const videoSizeCheck = await ensureRemoteFileSizeWithinLimit(videoUrl, MAX_VIDEO_SIZE_BYTES, '動画', corsHeaders)
+      if ('response' in videoSizeCheck) return videoSizeCheck.response
+
+      const audioSizeCheck = await ensureRemoteFileSizeWithinLimit(audioUrl, MAX_AUDIO_SIZE_BYTES, '音声', corsHeaders)
+      if ('response' in audioSizeCheck) return audioSizeCheck.response
+    }
+
     const ticketCheck = await ensureTicketAvailable(auth.admin, auth.user, VOICE_TICKET_COST, corsHeaders)
     if ('response' in ticketCheck) return ticketCheck.response
 
-    const usageId = `voice:${makeUsageId()}`
+    usageId = `voice:${makeUsageId()}`
     const ticketCharge = await consumeTicket(
       auth.admin,
       auth.user,
@@ -464,6 +678,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (ticketCharge.ticketsLeft !== undefined) responsePayload.ticketsLeft = ticketCharge.ticketsLeft
     return jsonResponse(responsePayload, 200, corsHeaders)
   } catch (error) {
+    if (usageId) {
+      const refund = await refundTicket(auth.admin, auth.user, { usage_id: usageId, reason: 'unexpected_error' }, usageId, corsHeaders)
+      if ('response' in refund) return refund.response
+    }
     return jsonResponse(
       { error: '動画合成ジョブの開始に失敗しました。', detail: error instanceof Error ? error.message : 'unknown_error' },
       500,

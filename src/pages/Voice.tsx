@@ -30,6 +30,9 @@ type PollStatus = 'AUDIO' | 'VIDEO' | null
 const OAUTH_REDIRECT_URL = getOAuthRedirectUrl()
 const VOICE_TICKET_COST = 1
 const DIALOG_MAX_CHARS = 100
+const VIDEO_MAX_DURATION_SECONDS = 120
+const VIDEO_MAX_FILE_SIZE_MB = 200
+const VIDEO_MAX_FILE_SIZE_BYTES = VIDEO_MAX_FILE_SIZE_MB * 1024 * 1024
 const FIXED_TEXT_LANG = 'ja'
 const FIXED_PROMPT_LANG = 'ja'
 const FIXED_FACE_MASK = '0'
@@ -49,6 +52,45 @@ const SAMPLE_VOICES: SampleVoice[] = [
 const FIXED_PROMPT_TEXT_BY_SAMPLE_ID: Record<string, string> = {}
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const getVideoDurationSeconds = (file: File) =>
+  new Promise<number>((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file)
+    const probe = document.createElement('video')
+    let cleaned = false
+
+    const cleanup = () => {
+      if (cleaned) return
+      cleaned = true
+      window.clearTimeout(timeoutId)
+      probe.onloadedmetadata = null
+      probe.onerror = null
+      probe.removeAttribute('src')
+      probe.load()
+      URL.revokeObjectURL(objectUrl)
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('動画の長さを確認できませんでした。'))
+    }, 10000)
+
+    probe.preload = 'metadata'
+    probe.onloadedmetadata = () => {
+      const duration = Number(probe.duration)
+      cleanup()
+      if (!Number.isFinite(duration) || duration <= 0) {
+        reject(new Error('動画の長さを確認できませんでした。'))
+        return
+      }
+      resolve(duration)
+    }
+    probe.onerror = () => {
+      cleanup()
+      reject(new Error('動画の長さを確認できませんでした。'))
+    }
+    probe.src = objectUrl
+  })
 
 const b64ToBlob = (b64: string, mime: string) => {
   const bin = atob(b64)
@@ -131,6 +173,7 @@ const findVideoAsset = (payload: unknown) => {
 
   return null
 }
+
 
 async function decodeAudioToBuffer(file: File): Promise<AudioBuffer> {
   const buf = await file.arrayBuffer()
@@ -346,6 +389,7 @@ export function Voice() {
   const accessToken = session?.access_token ?? ''
   const navigate = useNavigate()
   const videoUrlRef = useRef<string | null>(null)
+  const generateLockRef = useRef(false)
   const dialogLength = useMemo(() => [...dialog].length, [dialog])
 
   const selectedSampleVoice = useMemo(
@@ -362,7 +406,7 @@ export function Voice() {
   const viewerStyle = useMemo(
     () =>
       ({
-        '--viewer-aspect': '16 / 9',
+        '--viewer-aspect': '5 / 4',
         '--progress': result ? 1 : busy ? 0.5 : 0,
       }) as CSSProperties,
     [busy, result],
@@ -527,7 +571,10 @@ export function Voice() {
   )
 
   const handleGenerate = useCallback(async () => {
-    if (!session) {
+    if (generateLockRef.current || busy) return
+    generateLockRef.current = true
+    try {
+      if (!session) {
       setErrorModalMessage('Googleでログインしてください。')
       return
     }
@@ -545,6 +592,25 @@ export function Voice() {
     }
     if (dialogLength > DIALOG_MAX_CHARS) {
       setErrorModalMessage(`セリフは${DIALOG_MAX_CHARS}文字以内で入力してください。`)
+      return
+    }
+    if (video.size > VIDEO_MAX_FILE_SIZE_BYTES) {
+      setErrorModalMessage(`動画サイズは最大${VIDEO_MAX_FILE_SIZE_MB}MBまでです。`)
+      return
+    }
+
+    let videoDurationSeconds: number
+    try {
+      videoDurationSeconds = await getVideoDurationSeconds(video)
+    } catch {
+      setErrorModalMessage('動画の長さを確認できませんでした。別の動画を選択してください。')
+      return
+    }
+
+    if (videoDurationSeconds > VIDEO_MAX_DURATION_SECONDS) {
+      setErrorModalMessage(
+        `動画の長さは最大2分（${VIDEO_MAX_DURATION_SECONDS}秒）までです。現在の動画: ${Math.ceil(videoDurationSeconds)}秒`,
+      )
       return
     }
 
@@ -565,6 +631,9 @@ export function Voice() {
     setBusy(true)
     setStatus('AUDIO')
     setResult(null)
+
+    let wavJobIdForCancel = ''
+    let wavUsageIdForCancel = ''
 
     try {
       if (!selectedSampleVoicePublicUrl) throw new Error('音声素材が見つかりません。')
@@ -660,6 +729,8 @@ export function Voice() {
       const wavJobId = readString(wavStartPayload?.id).trim()
       if (!wavJobId) throw new Error('動画ジョブIDの取得に失敗しました。')
       const usageId = readString(wavStartPayload?.usage_id || wavStartPayload?.usageId)
+      wavJobIdForCancel = wavJobId
+      wavUsageIdForCancel = usageId
       const nextTickets = Number(wavStartPayload?.ticketsLeft ?? wavStartPayload?.tickets_left)
       if (Number.isFinite(nextTickets)) setTicketCount(nextTickets)
 
@@ -715,6 +786,15 @@ export function Voice() {
         promptId: asset.promptId,
       })
     } catch (error) {
+      if (wavJobIdForCancel && wavUsageIdForCancel) {
+        const query = new URLSearchParams()
+        query.set('id', wavJobIdForCancel)
+        query.set('usage_id', wavUsageIdForCancel)
+        void fetch(`/api/wav2lip?${query.toString()}`, {
+          method: 'DELETE',
+          headers: headersWithAuth(),
+        }).catch(() => null)
+      }
       setErrorModalMessage(sanitizeUiErrorMessage(error))
     } finally {
       setBusy(false)
@@ -723,8 +803,12 @@ export function Voice() {
         void fetchTickets(accessToken)
       }
     }
+    } finally {
+      generateLockRef.current = false
+    }
   }, [
     accessToken,
+    busy,
     dialog,
     dialogLength,
     fetchTickets,
@@ -738,23 +822,19 @@ export function Voice() {
     video,
   ])
 
-  const handleDownload = useCallback(async () => {
-    if (!videoUrlRef.current || !result) return
-    try {
-      const response = await fetch(videoUrlRef.current)
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = result.filename || 'voice-lipsync.mp4'
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 60000)
-    } catch {
-      window.location.assign(videoUrlRef.current)
-    }
+  const handleDownload = useCallback(() => {
+    const url = videoUrlRef.current
+    if (!url || !result) return
+
+    const link = document.createElement('a')
+    link.href = url
+    link.download = result.filename || 'voice-lipsync.mp4'
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }, [result])
+
 
   if (!authReady) {
     return (
@@ -786,20 +866,25 @@ export function Voice() {
                 {ticketStatus !== 'loading' && `クレジット: ${ticketCount ?? 0}`}
                 {ticketStatus === 'error' && ticketMessage ? ` / ${ticketMessage}` : ''}
               </div>
-              <h2>ボイスクローン動画生成</h2>
-              <p>動画と音声素材を選び、セリフを入力して生成します。</p>
+              <h2>リップシンク動画生成</h2>
+              <p>動画と音声素材を選び、セリフを入力して生成します。できるだけ正面で口がはっきりわかる動画を選択してください。動画が短い場合音声が再生し終わるまでループ再生になります。※稀に動画が倍速になります、その場合別の動画で生成してください</p>
             </div>
 
-            <label className='wizard-field'>
-              <span>動画アップロード</span>
-              <input
-                type='file'
-                accept='video/*'
-                onChange={(event) => {
-                  setVideo(event.target.files?.[0] || null)
-                }}
-              />
-            </label>
+            <div className='wizard-section'>
+              <label className='upload-box'>
+                <input
+                  type='file'
+                  accept='video/*'
+                  onChange={(event) => {
+                    setVideo(event.target.files?.[0] || null)
+                  }}
+                />
+                <div>
+                  <strong>{video?.name || '動画選択'}</strong>
+                  <span>合成する元動画を選択してください。</span>
+                </div>
+              </label>
+            </div>
 
             <label className='wizard-field'>
               <span>音声素材</span>

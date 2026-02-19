@@ -4,7 +4,9 @@
   "seed": { "id": "3", "input": "seed" },
   "steps": { "id": "3", "input": "steps" },
   "cfg": { "id": "3", "input": "cfg" },
+  "sampler_name": { "id": "3", "input": "sampler_name" },
+  "scheduler": { "id": "3", "input": "scheduler" },
+  "denoise": { "id": "3", "input": "denoise" },
   "width": { "id": "7", "input": "width" },
   "height": { "id": "7", "input": "height" }
 }
-

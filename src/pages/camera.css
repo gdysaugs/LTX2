@@ -508,6 +508,18 @@ body {
   gap: 12px;
 }
 
+.wizard-params-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 700px) {
+  .wizard-params-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .upload-box {
   border: 1px dashed rgba(79, 70, 229, 0.4);
   border-radius: 18px;
@@ -1507,12 +1519,12 @@ body {
     transform: none;
     width: 100%;
     height: auto;
-    padding: 10px 12px;
+    padding: 8px 10px;
     border-radius: 0;
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 6px;
     margin-bottom: 0;
   }
 
@@ -1521,15 +1533,15 @@ body {
   }
 
   .top-nav__title {
-    font-size: 1rem;
-    letter-spacing: 0.05em;
+    font-size: 0.92rem;
+    letter-spacing: 0.03em;
   }
 
   .top-nav__links {
     display: flex;
     justify-content: flex-end;
     flex-wrap: nowrap;
-    gap: 6px;
+    gap: 4px;
     width: auto;
     margin-left: auto;
     align-items: center;
@@ -1545,9 +1557,9 @@ body {
 
   .top-nav__link {
     flex: 0 0 auto;
-    padding: 7px 9px;
-    font-size: 0.74rem;
-    height: 32px;
+    padding: 6px 8px;
+    font-size: 0.7rem;
+    height: 30px;
   }
 
   .camera-hero {
@@ -1593,6 +1605,7 @@ body {
   .wizard-actions {
     justify-content: flex-start;
   }
+
 
   .workflow-stream,
   .workflow-stack {
@@ -1799,6 +1812,10 @@ body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.melt-modes--voice {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .melt-mode-card {

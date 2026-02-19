@@ -2,7 +2,7 @@ import { onRequestGet as qwenGet, onRequestPost as qwenPost, onRequestOptions as
 import { onRequestGet as wanGet, onRequestPost as wanPost, onRequestOptions as wanOptions } from '../functions/api/wan'
 import { onRequestGet as ticketsGet, onRequestOptions as ticketsOptions } from '../functions/api/tickets'
 import { onRequestGet as gptsovitsGet, onRequestPost as gptsovitsPost, onRequestOptions as gptsovitsOptions } from '../functions/api/gptsovits'
-import { onRequestGet as wav2lipGet, onRequestPost as wav2lipPost, onRequestOptions as wav2lipOptions } from '../functions/api/wav2lip'
+import { onRequestGet as wav2lipGet, onRequestPost as wav2lipPost, onRequestDelete as wav2lipDelete, onRequestOptions as wav2lipOptions } from '../functions/api/wav2lip'
 import { onRequestPost as r2PresignPost, onRequestOptions as r2PresignOptions } from '../functions/api/r2_presign'
 import { onRequestPost as stripeCheckoutPost, onRequestOptions as stripeCheckoutOptions } from '../functions/api/stripe/checkout'
 import { onRequestPost as stripeWebhookPost, onRequestOptions as stripeWebhookOptions } from '../functions/api/stripe/webhook'
@@ -81,6 +81,7 @@ export default {
       if (method === 'OPTIONS') return wav2lipOptions(args as any)
       if (method === 'GET') return wav2lipGet(args as any)
       if (method === 'POST') return wav2lipPost(args as any)
+      if (method === 'DELETE') return wav2lipDelete(args as any)
       return methodNotAllowed()
     }
 

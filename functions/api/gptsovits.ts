@@ -7,6 +7,7 @@ type Env = {
   RUNPOD_API_KEY?: string
   RUNPOD_ENDPOINT_URL?: string
   RUNPOD_GPTSOVITS_ENDPOINT_URL?: string
+  R2_BUCKET?: string
   SUPABASE_URL?: string
   SUPABASE_SERVICE_ROLE_KEY?: string
 }
@@ -26,6 +27,8 @@ type RunpodStatusResponse = {
 }
 
 const corsMethods = 'POST, GET, OPTIONS'
+const DEFAULT_R2_BUCKET = 'wav2lipsovits'
+const R2_HOST_SUFFIX = '.r2.cloudflarestorage.com'
 
 const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}) =>
   new Response(JSON.stringify(body), {
@@ -99,6 +102,33 @@ const parseBool = (value: FormDataEntryValue | null) => {
   return lowered === '1' || lowered === 'true' || lowered === 'yes' || lowered === 'on'
 }
 
+
+const isAllowedReferenceAudioUrl = (rawUrl: string, requestHost: string, env: Env) => {
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== 'https:') return false
+
+    const hostname = parsed.hostname.toLowerCase()
+    const normalizedRequestHost = requestHost.toLowerCase()
+    if (hostname === normalizedRequestHost && parsed.pathname.startsWith('/sample-voices/')) {
+      return true
+    }
+
+    if (!hostname.endsWith(R2_HOST_SUFFIX)) return false
+
+    const pathParts = parsed.pathname.split('/').filter(Boolean)
+    if (pathParts.length < 2) return false
+
+    const bucket = pathParts[0]
+    const key = pathParts.slice(1).join('/')
+    const expectedBucket = (env.R2_BUCKET || DEFAULT_R2_BUCKET).trim()
+    if (expectedBucket && bucket !== expectedBucket) return false
+
+    return key.startsWith('wav2lip/audio/') || key.startsWith('sample-voices/')
+  } catch {
+    return false
+  }
+}
 const runpodFetch = async (endpoint: string, apiKey: string, path: string, init?: RequestInit) => {
   const headers = new Headers(init?.headers)
   headers.set('Authorization', `Bearer ${apiKey}`)
@@ -179,10 +209,14 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     const autoPromptText = parseBool(form.get('auto_prompt_text'))
     const refAudioUrl = String(form.get('ref_audio_url') || '').trim()
     const refAudioFile = pickRefAudioFile(form)
+    const requestHost = new URL(request.url).hostname.toLowerCase()
 
     if (!text) return jsonResponse({ error: 'text is required.' }, 400, corsHeaders)
     if (!refAudioUrl && !refAudioFile) {
       return jsonResponse({ error: 'ref_audio_url or ref_audio is required.' }, 400, corsHeaders)
+    }
+    if (refAudioUrl && !isAllowedReferenceAudioUrl(refAudioUrl, requestHost, env)) {
+      return jsonResponse({ error: 'ref_audio_url は許可されていないURLです。' }, 400, corsHeaders)
     }
 
     let safeRefName = 'ref.wav'
