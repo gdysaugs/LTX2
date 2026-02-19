@@ -4,7 +4,7 @@ export function TopNav() {
   return (
     <header className='top-nav'>
       <div className='top-nav__brand'>
-        <span className='top-nav__title'>Melt AI</span>
+        <span className='top-nav__title'>Civitai UK</span>
       </div>
       <nav className='top-nav__links'>
         <NavLink to='/' className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`}>

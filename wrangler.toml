@@ -1,4 +1,4 @@
-name = "camcam2woorker"
+name = "ltx2-civitai-proxy"
 main = "worker/index.ts"
 compatibility_date = "2026-01-31"
 compatibility_flags = ["nodejs_compat"]

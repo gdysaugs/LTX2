@@ -17,7 +17,7 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
     <div className="melt-landing">
       <section className="melt-hero">
         <div className="melt-hero__copy">
-          <p className="melt-hero__kicker">Melt AI</p>
+          <p className="melt-hero__kicker">Civitai UK</p>
           <h1>生成AIスタジオ</h1>
           <p className="melt-hero__lead">
             リアル生成、アニメ生成、画像編集を1つのUIで完結。
@@ -39,7 +39,7 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
           </div>
         </div>
         <div className="melt-hero__media">
-          <img src={ASSETS.hero} alt="Melt AI ヒーロー画像" loading="eager" />
+          <img src={ASSETS.hero} alt="Civitai UK ヒーロー画像" loading="eager" />
         </div>
       </section>
 
@@ -132,7 +132,7 @@ export function GuestIntro({ mode: _mode, onSignIn }: GuestIntroProps) {
 
       <section className="melt-legal">
         <h2>特定商取引法に基づく表記</h2>
-        <p>販売事業者: Melt AI 運営事務局</p>
+        <p>販売事業者: Civitai UK 運営事務局</p>
         <p>連絡先: お問い合わせフォームよりご連絡ください</p>
         <p>販売価格: 各購入ページに記載</p>
         <p>支払方法: クレジットカード決済</p>

@@ -3,9 +3,10 @@ type CorsEnv = {
 }
 
 const DEFAULT_ALLOWED_ORIGINS = [
-  'https://meteoras.org',
-  'https://zimage-94b.pages.dev',
-  '*.zimage-94b.pages.dev',
+  'https://civitai.uk',
+  'https://www.civitai.uk',
+  'https://ltx2.pages.dev',
+  '*.ltx2.pages.dev',
 ]
 
 const normalize = (value: string) => value.trim().toLowerCase()
@@ -16,7 +17,11 @@ const parseAllowedOrigins = (env?: CorsEnv) => {
     .split(',')
     .map(normalize)
     .filter(Boolean)
-  return entries.length ? entries : DEFAULT_ALLOWED_ORIGINS
+
+  if (!entries.length) return DEFAULT_ALLOWED_ORIGINS
+
+  // Keep civitai defaults even when old env values remain configured.
+  return Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS.map(normalize), ...entries]))
 }
 
 const matchAllowedOrigin = (origin: string, allowed: string[]) => {
