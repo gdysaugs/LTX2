@@ -468,7 +468,8 @@ body {
 }
 
 .wizard-field input,
-.wizard-field textarea {
+.wizard-field textarea,
+.wizard-field select {
   width: 100%;
   border: 1px solid rgba(100, 116, 139, 0.45);
   border-radius: 16px;
@@ -488,6 +489,18 @@ body {
 .wizard-field textarea {
   resize: vertical;
   min-height: 110px;
+}
+
+.wizard-field__meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #64748b;
+  justify-self: end;
+}
+
+.wizard-field__meta.is-over {
+  color: #dc2626;
+  font-weight: 600;
 }
 
 .wizard-section {

@@ -16,6 +16,9 @@ export function TopNav() {
         <NavLink to='/image' className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`}>
           編集
         </NavLink>
+        <NavLink to='/voice' className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`}>
+          ボイス
+        </NavLink>
         <NavLink to='/purchase' className={({ isActive }) => `top-nav__link${isActive ? ' is-active' : ''}`}>
           クレジット
         </NavLink>
