@@ -1,5 +1,6 @@
 import { onRequestGet as qwenGet, onRequestPost as qwenPost, onRequestOptions as qwenOptions } from '../functions/api/qwen'
 import { onRequestGet as wanGet, onRequestPost as wanPost, onRequestOptions as wanOptions } from '../functions/api/wan'
+import { onRequestGet as animaGet, onRequestPost as animaPost, onRequestOptions as animaOptions } from '../functions/api/anima'
 import { onRequestGet as ticketsGet, onRequestOptions as ticketsOptions } from '../functions/api/tickets'
 import { onRequestGet as gptsovitsGet, onRequestPost as gptsovitsPost, onRequestOptions as gptsovitsOptions } from '../functions/api/gptsovits'
 import { onRequestGet as wav2lipGet, onRequestPost as wav2lipPost, onRequestDelete as wav2lipDelete, onRequestOptions as wav2lipOptions } from '../functions/api/wav2lip'
@@ -11,6 +12,7 @@ type Env = {
   RUNPOD_API_KEY: string
   RUNPOD_ENDPOINT_URL?: string
   RUNPOD_WAN_ENDPOINT_URL?: string
+  RUNPOD_ANIMA_ENDPOINT_URL?: string
   RUNPOD_GPTSOVITS_ENDPOINT_URL?: string
   RUNPOD_WAV2LIP_ENDPOINT_URL?: string
   COMFY_ORG_API_KEY?: string
@@ -55,6 +57,13 @@ export default {
       if (method === 'OPTIONS') return wanOptions(args as any)
       if (method === 'GET') return wanGet(args as any)
       if (method === 'POST') return wanPost(args as any)
+      return methodNotAllowed()
+    }
+
+    if (path.startsWith('/api/anima')) {
+      if (method === 'OPTIONS') return animaOptions(args as any)
+      if (method === 'GET') return animaGet(args as any)
+      if (method === 'POST') return animaPost(args as any)
       return methodNotAllowed()
     }
 
