@@ -1528,12 +1528,23 @@ body {
   .top-nav__links {
     display: flex;
     justify-content: flex-end;
+    flex-wrap: nowrap;
     gap: 6px;
     width: auto;
+    margin-left: auto;
     align-items: center;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .top-nav__links::-webkit-scrollbar {
+    display: none;
   }
 
   .top-nav__link {
+    flex: 0 0 auto;
     padding: 7px 9px;
     font-size: 0.74rem;
     height: 32px;
