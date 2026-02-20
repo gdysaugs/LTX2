@@ -366,7 +366,7 @@ export function Account() {
         ))}
       </div>
     )
-  }, [deletingUsageId, errorMessage, handleDelete, handleEdit, handleRegenerate, hasHistory, items, loading])
+  }, [deletingUsageId, errorMessage, handleDelete, handleEdit, handleRegenerate, hasHistory, historyBlobUrls, items, loading])
 
   if (!authReady) {
     return (
