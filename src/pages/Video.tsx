@@ -28,55 +28,57 @@ const FIXED_CFG = 4.5
 const FIXED_WIDTH = 1024
 const FIXED_HEIGHT = 1024
 const DEFAULT_DENOISE = 1
+const DEFAULT_FIXED_SEED = 0
 const DEFAULT_SAMPLER = 'er_sde'
 const DEFAULT_SCHEDULER = 'simple'
 
 type ParameterGuideItem = {
   key: string
+  label: string
   description: string
 }
 
 const SAMPLER_GUIDE: ParameterGuideItem[] = [
-  { key: 'er_sde', description: '標準的で安定。線がシャープで破綻しにくい基本設定。' },
-  { key: 'euler', description: '軽めで扱いやすい。速度と安定性のバランス型。' },
-  { key: 'euler_cfg_pp', description: 'euler系のCFG耐性を高めた派生。高CFGで崩れにくい。' },
-  { key: 'euler_ancestral', description: '柔らかく変化が出やすい。ランダム性がやや強め。' },
-  { key: 'euler_ancestral_cfg_pp', description: 'euler_ancestralのCFG耐性強化版。' },
-  { key: 'heun', description: '輪郭を保ちやすく、硬めで安定寄りの出力。' },
-  { key: 'heunpp2', description: 'heun派生。エッジを保ちながらノイズを抑えやすい。' },
-  { key: 'dpm_2', description: 'DPM系の基本。やや重いが丁寧な出力。' },
-  { key: 'dpm_2_ancestral', description: 'dpm_2より変化量を持たせたい時向け。' },
-  { key: 'lms', description: 'なめらか寄り。破綻を抑えたい場面で使いやすい。' },
-  { key: 'dpm_fast', description: '高速寄り。品質より速度を優先したい時向け。' },
-  { key: 'dpm_adaptive', description: 'ステップ配分を自動調整。シーンにより結果差が大きい。' },
-  { key: 'dpmpp_2s_ancestral', description: '変化が出やすく、雰囲気重視の生成に向く。' },
-  { key: 'dpmpp_2s_ancestral_cfg_pp', description: '2s_ancestral系のCFG耐性強化版。' },
-  { key: 'dpmpp_sde', description: '安定性と表現力のバランスが良いSDE系。' },
-  { key: 'dpmpp_sde_gpu', description: 'dpmpp_sdeのGPU最適化版。近い傾向で速度改善を狙える。' },
-  { key: 'dpmpp_2m', description: '万能寄り。ディテールと安定性のバランスが良い。' },
-  { key: 'dpmpp_2m_cfg_pp', description: 'dpmpp_2mのCFG耐性強化版。' },
-  { key: 'dpmpp_2m_sde', description: 'dpmpp_2mより変化を持たせつつ破綻を抑えたい時向け。' },
-  { key: 'dpmpp_2m_sde_gpu', description: 'dpmpp_2m_sdeのGPU最適化版。速度寄り。' },
-  { key: 'dpmpp_3m_sde', description: '多段で丁寧。重いが細部を詰めたい時向け。' },
-  { key: 'dpmpp_3m_sde_gpu', description: 'dpmpp_3m_sdeのGPU最適化版。' },
-  { key: 'ddpm', description: 'オーソドックスな拡散手法。安定寄りだが重め。' },
-  { key: 'lcm', description: '少ないステップで高速生成。荒れやすい時はsteps/CFGを控えめに。' },
-  { key: 'ipndm', description: '高速寄りの近似法。軽快だが絵柄の癖が出る場合あり。' },
-  { key: 'ipndm_v', description: 'ipndmの派生。より滑らかな出力を狙う版。' },
-  { key: 'deis', description: 'ステップ効率が良く、短時間でまとまりやすい。' },
-  { key: 'ddim', description: '再現性を取りやすい定番。比較用ベースとして有用。' },
-  { key: 'uni_pc', description: '精度重視の統合ソルバ。品質優先時に試す価値あり。' },
-  { key: 'uni_pc_bh2', description: 'uni_pc系の別設定。輪郭と安定性の傾向が少し変わる。' },
+  { key: 'er_sde', label: 'Sakura', description: '標準的で安定。線がシャープで破綻しにくい基本設定。' },
+  { key: 'euler', label: 'Camellia', description: '軽めで扱いやすい。速度と安定性のバランス型。' },
+  { key: 'euler_cfg_pp', label: 'Violet', description: 'euler系のCFG耐性を高めた派生。高CFGで崩れにくい。' },
+  { key: 'euler_ancestral', label: 'Peony', description: '柔らかく変化が出やすい。ランダム性がやや強め。' },
+  { key: 'euler_ancestral_cfg_pp', label: 'Lily', description: 'euler_ancestralのCFG耐性強化版。' },
+  { key: 'heun', label: 'Wisteria', description: '輪郭を保ちやすく、硬めで安定寄りの出力。' },
+  { key: 'heunpp2', label: 'Chrysanthemum', description: 'heun派生。エッジを保ちながらノイズを抑えやすい。' },
+  { key: 'dpm_2', label: 'Lotus', description: 'DPM系の基本。やや重いが丁寧な出力。' },
+  { key: 'dpm_2_ancestral', label: 'Rose', description: 'dpm_2より変化量を持たせたい時向け。' },
+  { key: 'lms', label: 'Iris', description: 'なめらか寄り。破綻を抑えたい場面で使いやすい。' },
+  { key: 'dpm_fast', label: 'Paeonia', description: '高速寄り。品質より速度を優先したい時向け。' },
+  { key: 'dpm_adaptive', label: 'Sunflower', description: 'ステップ配分を自動調整。シーンにより結果差が大きい。' },
+  { key: 'dpmpp_2s_ancestral', label: 'Cosmos', description: '変化が出やすく、雰囲気重視の生成に向く。' },
+  { key: 'dpmpp_2s_ancestral_cfg_pp', label: 'Osmanthus', description: '2s_ancestral系のCFG耐性強化版。' },
+  { key: 'dpmpp_sde', label: 'Daphne', description: '安定性と表現力のバランスが良いSDE系。' },
+  { key: 'dpmpp_sde_gpu', label: 'Plum', description: 'dpmpp_sdeのGPU最適化版。近い傾向で速度改善を狙える。' },
+  { key: 'dpmpp_2m', label: 'Peach', description: '万能寄り。ディテールと安定性のバランスが良い。' },
+  { key: 'dpmpp_2m_cfg_pp', label: 'Hydrangea', description: 'dpmpp_2mのCFG耐性強化版。' },
+  { key: 'dpmpp_2m_sde', label: 'Sasanqua', description: 'dpmpp_2mより変化を持たせつつ破綻を抑えたい時向け。' },
+  { key: 'dpmpp_2m_sde_gpu', label: 'Bellflower', description: 'dpmpp_2m_sdeのGPU最適化版。速度寄り。' },
+  { key: 'dpmpp_3m_sde', label: 'Lycoris', description: '多段で丁寧。重いが細部を詰めたい時向け。' },
+  { key: 'dpmpp_3m_sde_gpu', label: 'LilyOfTheValley', description: 'dpmpp_3m_sdeのGPU最適化版。' },
+  { key: 'ddpm', label: 'ForgetMeNot', description: 'オーソドックスな拡散手法。安定寄りだが重め。' },
+  { key: 'lcm', label: 'Nadeshiko', description: '少ないステップで高速生成。荒れやすい時はsteps/CFGを控えめに。' },
+  { key: 'ipndm', label: 'Magnolia', description: '高速寄りの近似法。軽快だが絵柄の癖が出る場合あり。' },
+  { key: 'ipndm_v', label: 'Narcissus', description: 'ipndmの派生。より滑らかな出力を狙う版。' },
+  { key: 'deis', label: 'Cattleya', description: 'ステップ効率が良く、短時間でまとまりやすい。' },
+  { key: 'ddim', label: 'Gerbera', description: '再現性を取りやすい定番。比較用ベースとして有用。' },
+  { key: 'uni_pc', label: 'Freesia', description: '精度重視の統合ソルバ。品質優先時に試す価値あり。' },
+  { key: 'uni_pc_bh2', label: 'Ranunculus', description: 'uni_pc系の別設定。輪郭と安定性の傾向が少し変わる。' },
 ]
 
 const SCHEDULER_GUIDE: ParameterGuideItem[] = [
-  { key: 'simple', description: '基本設定。迷ったらこれ。安定性重視。' },
-  { key: 'normal', description: '標準カーブ。simpleよりわずかに変化が出やすい。' },
-  { key: 'karras', description: '後半に密度を寄せる傾向。細部の詰まりを狙いやすい。' },
-  { key: 'exponential', description: '指数カーブ。コントラストが強めに出る場合がある。' },
-  { key: 'sgm_uniform', description: '均等配分で素直な変化。比較用途に向く。' },
-  { key: 'ddim_uniform', description: 'ddim向け均等配分。再現性チェックに使いやすい。' },
-  { key: 'beta', description: 'ノイズ配分を変える実験寄り設定。結果差の確認向け。' },
+  { key: 'simple', label: 'Polaris', description: '基本設定。迷ったらこれ。安定性重視。' },
+  { key: 'normal', label: 'Sirius', description: '標準カーブ。simpleよりわずかに変化が出やすい。' },
+  { key: 'karras', label: 'Vega', description: '後半に密度を寄せる傾向。細部の詰まりを狙いやすい。' },
+  { key: 'exponential', label: 'Altair', description: '指数カーブ。コントラストが強めに出る場合がある。' },
+  { key: 'sgm_uniform', label: 'Rigel', description: '均等配分で素直な変化。比較用途に向く。' },
+  { key: 'ddim_uniform', label: 'Spica', description: 'ddim向け均等配分。再現性チェックに使いやすい。' },
+  { key: 'beta', label: 'Antares', description: 'ノイズ配分を変える実験寄り設定。結果差の確認向け。' },
 ]
 
 const OAUTH_REDIRECT_URL = getOAuthRedirectUrl()
@@ -246,9 +248,7 @@ export function Video() {
   const [cfg, setCfg] = useState(FIXED_CFG)
   const [samplerName, setSamplerName] = useState(DEFAULT_SAMPLER)
   const [scheduler, setScheduler] = useState(DEFAULT_SCHEDULER)
-  const [denoise, setDenoise] = useState(DEFAULT_DENOISE)
   const [randomizeSeed, setRandomizeSeed] = useState(true)
-  const [seed, setSeed] = useState(0)
   const [result, setResult] = useState<RenderResult | null>(null)
   const [statusMessage, setStatusMessage] = useState('')
   const [isRunning, setIsRunning] = useState(false)
@@ -364,11 +364,11 @@ export function Video() {
         height: FIXED_HEIGHT,
         steps: safeSteps,
         cfg: safeCfg,
-        seed,
+        seed: DEFAULT_FIXED_SEED,
         randomize_seed: randomizeSeed,
         sampler_name: samplerName,
         scheduler,
-        denoise,
+        denoise: DEFAULT_DENOISE,
       }
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (token) headers.Authorization = 'Bearer ' + token
@@ -399,7 +399,7 @@ export function Video() {
       if (!usageId) throw new Error('usage_id の取得に失敗しました。')
       return { jobId, usageId }
     },
-    [cfg, denoise, negativePrompt, prompt, randomizeSeed, samplerName, scheduler, seed, steps],
+    [cfg, negativePrompt, prompt, randomizeSeed, samplerName, scheduler, steps],
   )
 
   const pollJob = useCallback(async (jobId: string, usageId: string, runId: number, token?: string) => {
@@ -639,7 +639,7 @@ export function Video() {
                   <select value={samplerName} onChange={(e) => setSamplerName(e.target.value)}>
                     {SAMPLER_GUIDE.map((item) => (
                       <option key={item.key} value={item.key} title={item.description}>
-                        {item.key}
+                        {item.label}
                       </option>
                     ))}
                   </select>
@@ -650,35 +650,12 @@ export function Video() {
                   <select value={scheduler} onChange={(e) => setScheduler(e.target.value)}>
                     {SCHEDULER_GUIDE.map((item) => (
                       <option key={item.key} value={item.key} title={item.description}>
-                        {item.key}
+                        {item.label}
                       </option>
                     ))}
                   </select>
                 </label>
 
-                <label className='wizard-field'>
-                  <span>Denoise (0-1)</span>
-                  <input
-                    type='number'
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={denoise}
-                    onChange={(e) => setDenoise(Number(e.target.value || 0))}
-                  />
-                </label>
-
-                <label className='wizard-field'>
-                  <span>Seed</span>
-                  <input
-                    type='number'
-                    min={0}
-                    step={1}
-                    value={seed}
-                    onChange={(e) => setSeed(Math.floor(Number(e.target.value || 0)))}
-                    disabled={randomizeSeed}
-                  />
-                </label>
               </div>
 
               <div className='wizard-parameter-guide'>
@@ -692,14 +669,11 @@ export function Video() {
                   <code>4-5</code>。
                 </p>
                 <p>
-                  <strong>Sampler</strong>: 画風の出方を決める方式。<code>er_sde</code> は安定、<code>euler_ancestral</code> は柔らかめ、
-                  <code>dpmpp_2m_sde</code> は変化が大きめです。
+                  <strong>Sampler</strong>: 画風の出方を決める方式。<code>Sakura</code> は安定、<code>Peony</code> は柔らかめ、
+                  <code>Sasanqua</code> は変化が大きめです。
                 </p>
                 <p>
-                  <strong>Scheduler</strong>: ノイズ減衰のカーブ。迷ったら <code>simple</code> か <code>normal</code> がおすすめです。
-                </p>
-                <p>
-                  <strong>Denoise</strong>: 変化量。<code>1.0</code> はしっかり再生成、低くすると元の構図や特徴を残しやすくなります。
+                  <strong>Scheduler</strong>: ノイズ減衰のカーブ。迷ったら <code>Polaris</code> か <code>Sirius</code> がおすすめです。
                 </p>
                 <p>
                   <strong>Seed</strong>: 構図の乱数。固定で同系統の再現、ランダムで毎回変化します。
@@ -712,7 +686,7 @@ export function Video() {
                   <p className='wizard-parameter-catalog__title'>Sampler</p>
                   {SAMPLER_GUIDE.map((item) => (
                     <p key={item.key}>
-                      <code>{item.key}</code>: {item.description}
+                      <code>{item.label}</code>: {item.description}
                     </p>
                   ))}
                 </div>
@@ -720,7 +694,7 @@ export function Video() {
                   <p className='wizard-parameter-catalog__title'>Scheduler</p>
                   {SCHEDULER_GUIDE.map((item) => (
                     <p key={item.key}>
-                      <code>{item.key}</code>: {item.description}
+                      <code>{item.label}</code>: {item.description}
                     </p>
                   ))}
                 </div>
