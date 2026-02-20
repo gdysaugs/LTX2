@@ -5,6 +5,7 @@ import qwenEditNodeMapTemplate from './qwen-edit-node-map.json'
 import { createClient, type User } from '@supabase/supabase-js'
 import { buildCorsHeaders, isCorsBlocked } from '../_shared/cors'
 import { isUnderageImage } from '../_shared/rekognition'
+import { presignUrl } from '../_shared/sigv4'
 
 type Env = {
   RUNPOD_API_KEY: string
@@ -13,6 +14,11 @@ type Env = {
   RUNPOD_ENDPOINT_URL?: string
   COMFY_ORG_API_KEY?: string
   RUNPOD_WORKER_MODE?: string
+  R2_ANIMA_BUCKET?: string
+  R2_ACCOUNT_ID?: string
+  R2_ACCESS_KEY_ID?: string
+  R2_SECRET_ACCESS_KEY?: string
+  R2_REGION?: string
   AWS_ACCESS_KEY_ID?: string
   AWS_SECRET_ACCESS_KEY?: string
   AWS_REGION?: string
@@ -94,6 +100,43 @@ const MIN_ANGLE_STRENGTH = 0
 const MAX_ANGLE_STRENGTH = 1
 const UNDERAGE_BLOCK_MESSAGE =
   'This image may contain violent, underage, or policy-violating content. Please try another image.'
+const DEFAULT_R2_BUCKET = 'anima'
+const R2_PUT_EXPIRES_SECONDS = 15 * 60
+const R2_GET_EXPIRES_SECONDS = 7 * 24 * 60 * 60
+
+type R2Config = {
+  host: string
+  bucket: string
+  accessKeyId: string
+  secretAccessKey: string
+  region: string
+}
+
+type UploadedImageRef = {
+  key: string
+  url: string
+}
+
+type GenerationSummary = {
+  prompt: string
+  negative_prompt: string
+  width: number
+  height: number
+  steps: number
+  cfg: number
+  seed: number
+  randomize_seed: boolean
+  sampler_name: string
+  scheduler: string
+  denoise: number
+}
+
+type GenerationRecordPatch = {
+  runpod_job_id?: string | null
+  status?: string
+  error_message?: string | null
+  r2_key?: string | null
+}
 
 const getWorkflowTemplate = (variant: WorkflowVariant) =>
   (variant === 'qwen_edit' ? qwenEditWorkflowTemplate : zimageWorkflowTemplate) as Record<string, unknown>
@@ -177,6 +220,321 @@ const inferVariantFromUsageId = (usageId: string): WorkflowVariant => {
   if (normalized.startsWith('qwen:')) return 'qwen_edit'
   if (normalized.startsWith('zimage:') || normalized.startsWith('z:')) return 'zimage'
   return 'zimage'
+}
+
+const resolveR2Config = (env: Env): R2Config | null => {
+  const accountId = env.R2_ACCOUNT_ID?.trim()
+  const accessKeyId = env.R2_ACCESS_KEY_ID?.trim()
+  const secretAccessKey = env.R2_SECRET_ACCESS_KEY?.trim()
+  if (!accountId || !accessKeyId || !secretAccessKey) return null
+  const bucket = env.R2_ANIMA_BUCKET?.trim() || DEFAULT_R2_BUCKET
+  const region = env.R2_REGION?.trim().replace(/^#+/, '') || 'auto'
+  return {
+    host: `${accountId}.r2.cloudflarestorage.com`,
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+    region,
+  }
+}
+
+const safeKeyPart = (value: string) => value.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown'
+
+const extFromMime = (mime: string) => {
+  const normalized = mime.toLowerCase()
+  if (normalized.includes('image/jpeg')) return 'jpg'
+  if (normalized.includes('image/webp')) return 'webp'
+  if (normalized.includes('image/gif')) return 'gif'
+  return 'png'
+}
+
+const normalizeBase64 = (value: string) => value.trim().replace(/\s+/g, '')
+
+const parseImageString = (value: unknown): { base64: string; mime: string; ext: string } | null => {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed || /^https?:\/\//i.test(trimmed)) return null
+  const dataUrlMatch = trimmed.match(/^data:([^;,]+);base64,(.+)$/i)
+  if (dataUrlMatch) {
+    const mime = dataUrlMatch[1].toLowerCase()
+    const base64 = normalizeBase64(dataUrlMatch[2])
+    if (!base64) return null
+    return { base64, mime, ext: extFromMime(mime) }
+  }
+  const base64 = normalizeBase64(trimmed)
+  if (!base64) return null
+  return { base64, mime: 'image/png', ext: 'png' }
+}
+
+const base64ToBytes = (base64: string): Uint8Array => {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+const createImageR2Key = (userId: string, usageId: string, ext: string) =>
+  `anima/${safeKeyPart(userId)}/${safeKeyPart(usageId)}/${crypto.randomUUID()}.${ext}`
+
+const uploadBase64ImageToR2 = async (
+  config: R2Config,
+  parsed: { base64: string; mime: string; ext: string },
+  userId: string,
+  usageId: string,
+) => {
+  const key = createImageR2Key(userId, usageId, parsed.ext)
+  const canonicalUri = `/${config.bucket}/${key}`
+  const put = await presignUrl({
+    method: 'PUT',
+    host: config.host,
+    canonicalUri,
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    region: config.region,
+    expiresSeconds: R2_PUT_EXPIRES_SECONDS,
+    additionalSignedHeaders: { 'x-amz-content-sha256': 'UNSIGNED-PAYLOAD' },
+  })
+  const putRes = await fetch(put.url, {
+    method: 'PUT',
+    headers: {
+      'x-amz-content-sha256': 'UNSIGNED-PAYLOAD',
+      'content-type': parsed.mime,
+    },
+    body: base64ToBytes(parsed.base64),
+  })
+  if (!putRes.ok) {
+    throw new Error(`R2 put failed with status ${putRes.status}`)
+  }
+  const get = await presignUrl({
+    method: 'GET',
+    host: config.host,
+    canonicalUri,
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    region: config.region,
+    expiresSeconds: R2_GET_EXPIRES_SECONDS,
+  })
+  return { key, url: get.url } as UploadedImageRef
+}
+
+const maybeUploadImageValue = async (value: unknown, config: R2Config, userId: string, usageId: string) => {
+  const parsed = parseImageString(value)
+  if (!parsed) return null
+  try {
+    return await uploadBase64ImageToR2(config, parsed, userId, usageId)
+  } catch {
+    return null
+  }
+}
+
+const maybeReplaceObjectImageFields = async (
+  record: Record<string, unknown>,
+  config: R2Config,
+  userId: string,
+  usageId: string,
+) => {
+  let firstUploaded: UploadedImageRef | null = null
+  for (const field of ['image', 'data', 'url', 'output_image', 'output_image_base64']) {
+    if (!(field in record)) continue
+    const replaced = await maybeUploadImageValue(record[field], config, userId, usageId)
+    if (replaced) {
+      record[field] = replaced.url
+      if (!firstUploaded) firstUploaded = replaced
+    }
+  }
+  return firstUploaded
+}
+
+const isCompletedStatus = (value: unknown) => {
+  const status = String(value ?? '').toLowerCase()
+  return (
+    status.includes('complete') ||
+    status.includes('success') ||
+    status.includes('succeed') ||
+    status.includes('finished')
+  )
+}
+
+const persistImagesToR2 = async (payload: unknown, env: Env, userId: string, usageId: string) => {
+  if (!payload || typeof payload !== 'object') return { firstKey: null as string | null }
+  const config = resolveR2Config(env)
+  if (!config) return { firstKey: null as string | null }
+
+  let firstKey: string | null = null
+  const data = payload as Record<string, any>
+  const seenArrays = new Set<any[]>()
+  const listCandidates: unknown[] = [
+    data.output?.images,
+    data.output?.output_images,
+    data.output?.outputs,
+    data.output?.data,
+    data.result?.images,
+    data.result?.output_images,
+    data.result?.outputs,
+    data.result?.data,
+    data.images,
+    data.output_images,
+    data.outputs,
+    data.data,
+    data.output?.output?.images,
+    data.output?.output?.output_images,
+    data.output?.output?.outputs,
+    data.output?.output?.data,
+    data.result?.output?.images,
+    data.result?.output?.output_images,
+    data.result?.output?.outputs,
+    data.result?.output?.data,
+  ]
+
+  for (const candidate of listCandidates) {
+    if (!Array.isArray(candidate) || seenArrays.has(candidate)) continue
+    seenArrays.add(candidate)
+    for (let i = 0; i < candidate.length; i += 1) {
+      const item = candidate[i]
+      if (typeof item === 'string') {
+        const replaced = await maybeUploadImageValue(item, config, userId, usageId)
+        if (replaced) {
+          candidate[i] = replaced.url
+          if (!firstKey) firstKey = replaced.key
+        }
+        continue
+      }
+      if (item && typeof item === 'object') {
+        const replaced = await maybeReplaceObjectImageFields(item as Record<string, unknown>, config, userId, usageId)
+        if (replaced && !firstKey) firstKey = replaced.key
+      }
+    }
+  }
+
+  const singleCandidates: Array<{ read: () => unknown; write: (next: string) => void }> = [
+    { read: () => data.output?.image, write: (next) => { if (data.output) data.output.image = next } },
+    { read: () => data.output?.output_image, write: (next) => { if (data.output) data.output.output_image = next } },
+    {
+      read: () => data.output?.output_image_base64,
+      write: (next) => {
+        if (data.output) data.output.output_image_base64 = next
+      },
+    },
+    { read: () => data.result?.image, write: (next) => { if (data.result) data.result.image = next } },
+    { read: () => data.result?.output_image, write: (next) => { if (data.result) data.result.output_image = next } },
+    {
+      read: () => data.result?.output_image_base64,
+      write: (next) => {
+        if (data.result) data.result.output_image_base64 = next
+      },
+    },
+    { read: () => data.image, write: (next) => { data.image = next } },
+    { read: () => data.output_image, write: (next) => { data.output_image = next } },
+    { read: () => data.output_image_base64, write: (next) => { data.output_image_base64 = next } },
+    {
+      read: () => data.output?.output?.image,
+      write: (next) => {
+        if (data.output?.output) data.output.output.image = next
+      },
+    },
+    {
+      read: () => data.output?.output?.output_image,
+      write: (next) => {
+        if (data.output?.output) data.output.output.output_image = next
+      },
+    },
+    {
+      read: () => data.output?.output?.output_image_base64,
+      write: (next) => {
+        if (data.output?.output) data.output.output.output_image_base64 = next
+      },
+    },
+  ]
+
+  for (const ref of singleCandidates) {
+    const replaced = await maybeUploadImageValue(ref.read(), config, userId, usageId)
+    if (replaced) {
+      ref.write(replaced.url)
+      if (!firstKey) firstKey = replaced.key
+    }
+  }
+
+  return { firstKey }
+}
+
+const extractRunpodJobId = (payload: any) =>
+  payload?.id || payload?.jobId || payload?.job_id || payload?.output?.id || null
+
+const normalizeGenerationStatus = (value: unknown, fallback = 'queued') => {
+  const status = String(value ?? '').trim().toLowerCase()
+  return status || fallback
+}
+
+const safeInsertGenerationRecord = async (
+  admin: ReturnType<typeof createClient>,
+  user: User,
+  usageId: string,
+  summary: GenerationSummary,
+) => {
+  if (!user.email) return
+  try {
+    await admin.from('anima_generations').insert({
+      usage_id: usageId,
+      user_id: user.id,
+      email: user.email,
+      prompt: summary.prompt,
+      negative_prompt: summary.negative_prompt,
+      width: summary.width,
+      height: summary.height,
+      steps: summary.steps,
+      cfg: summary.cfg,
+      seed: summary.seed,
+      randomize_seed: summary.randomize_seed,
+      sampler_name: summary.sampler_name,
+      scheduler: summary.scheduler,
+      denoise: summary.denoise,
+      status: 'queued',
+    })
+  } catch {
+    // Best-effort logging table.
+  }
+}
+
+const safeUpdateGenerationRecord = async (
+  admin: ReturnType<typeof createClient>,
+  usageId: string,
+  patch: GenerationRecordPatch,
+) => {
+  try {
+    const updatePayload: Record<string, unknown> = {}
+    if (patch.runpod_job_id !== undefined) updatePayload.runpod_job_id = patch.runpod_job_id
+    if (patch.status !== undefined) updatePayload.status = patch.status
+    if (patch.error_message !== undefined) updatePayload.error_message = patch.error_message
+    if (patch.r2_key !== undefined) updatePayload.r2_key = patch.r2_key
+    if (!Object.keys(updatePayload).length) return
+    await admin.from('anima_generations').update(updatePayload).eq('usage_id', usageId)
+  } catch {
+    // Best-effort logging table.
+  }
+}
+
+const resolveSourcePrompt = async (
+  admin: ReturnType<typeof createClient>,
+  user: User,
+  sourceUsageId: string,
+) => {
+  const usageId = sourceUsageId.trim()
+  if (!usageId) return null
+  try {
+    const { data, error } = await admin
+      .from('anima_generations')
+      .select('prompt')
+      .eq('usage_id', usageId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+    if (error || !data) return null
+    const prompt = typeof data.prompt === 'string' ? data.prompt.trim() : ''
+    return prompt || null
+  } catch {
+    return null
+  }
 }
 
 const fetchTicketRow = async (
@@ -656,8 +1014,34 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
     }
   }
 
-  if (ticketsLeft !== null && payload && typeof payload === 'object' && !Array.isArray(payload)) {
-    payload.ticketsLeft = ticketsLeft
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const status = normalizeGenerationStatus(payload?.status ?? payload?.state, upstream.ok ? 'running' : 'error')
+    const payloadError =
+      payload?.error ||
+      payload?.output?.error ||
+      payload?.result?.error ||
+      payload?.output?.output?.error ||
+      payload?.result?.output?.error
+    const isFailure = isFailureStatus(payload) || Boolean(payloadError) || !upstream.ok
+    let firstR2Key: string | null = null
+
+    if (variant === 'qwen_edit' && isCompletedStatus(status)) {
+      const persisted = await persistImagesToR2(payload, env, auth.user.id, usageId)
+      firstR2Key = persisted.firstKey
+    }
+
+    if (variant === 'qwen_edit') {
+      await safeUpdateGenerationRecord(auth.admin, usageId, {
+        runpod_job_id: String(extractRunpodJobId(payload) ?? id),
+        status: isFailure ? 'error' : status,
+        error_message: isFailure ? String(payloadError ?? `upstream_${upstream.status}`) : isCompletedStatus(status) ? null : undefined,
+        ...(firstR2Key ? { r2_key: firstR2Key } : {}),
+      })
+    }
+
+    if (ticketsLeft !== null) {
+      payload.ticketsLeft = ticketsLeft
+    }
     payload.usage_id = usageId
     return jsonResponse(payload, upstream.status, corsHeaders)
   }
@@ -761,6 +1145,10 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   const prompt = String(input?.prompt ?? input?.text ?? '')
   const negativePrompt = String(input?.negative_prompt ?? input?.negative ?? '')
+  const sourceUsageId =
+    variant === 'qwen_edit'
+      ? String(safeInput.source_usage_id ?? safeInput.sourceUsageId ?? '').trim()
+      : ''
   const steps = FIXED_STEPS
   const guidanceScale = Number(input?.guidance_scale ?? input?.cfg ?? 1)
   const width = Math.floor(Number(input?.width ?? 768))
@@ -816,10 +1204,30 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     height,
     steps,
     mode: useComfyUi ? 'comfyui' : 'runpod',
+    ...(sourceUsageId ? { source_usage_id: sourceUsageId } : {}),
   }
   const ticketCheck = await ensureTicketAvailable(auth.admin, auth.user, corsHeaders)
   if ('response' in ticketCheck) {
     return ticketCheck.response
+  }
+
+  let generationSummary: GenerationSummary | null = null
+  if (variant === 'qwen_edit') {
+    const inheritedPrompt = await resolveSourcePrompt(auth.admin, auth.user, sourceUsageId)
+    const seedValue = Math.floor(Number(input?.seed ?? 0))
+    generationSummary = {
+      prompt: inheritedPrompt ?? prompt,
+      negative_prompt: negativePrompt,
+      width,
+      height,
+      steps,
+      cfg: guidanceScale,
+      seed: Number.isFinite(seedValue) ? Math.max(0, Math.min(2147483647, seedValue)) : 0,
+      randomize_seed: Boolean(input?.randomize_seed ?? true),
+      sampler_name: 'qwen_edit',
+      scheduler: 'qwen_edit',
+      denoise: 1,
+    }
   }
 
   let workflow: Record<string, unknown> | null = null
@@ -850,6 +1258,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const consumedTickets = Number((ticketCharge as { ticketsLeft?: unknown }).ticketsLeft)
   if (Number.isFinite(consumedTickets)) {
     ticketsLeft = consumedTickets
+  }
+  if (variant === 'qwen_edit' && generationSummary) {
+    await safeInsertGenerationRecord(auth.admin, auth.user, usageId, generationSummary)
   }
 
   if (useComfyUi) {
@@ -903,6 +1314,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       const nextTickets = Number((refundResult as { ticketsLeft?: unknown }).ticketsLeft)
       if (Number.isFinite(nextTickets)) {
         ticketsLeft = nextTickets
+      }
+      if (variant === 'qwen_edit') {
+        await safeUpdateGenerationRecord(auth.admin, usageId, {
+          status: 'error',
+          error_message: error instanceof Error ? error.message : 'workflow_apply_failed',
+        })
       }
       return jsonResponse(
         {
@@ -958,6 +1375,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       if (Number.isFinite(nextTickets)) {
         ticketsLeft = nextTickets
       }
+      if (variant === 'qwen_edit') {
+        await safeUpdateGenerationRecord(auth.admin, usageId, {
+          status: 'error',
+          error_message: error instanceof Error ? error.message : 'network_error',
+        })
+      }
       return jsonResponse(
         {
           error: 'RunPod request failed.',
@@ -989,9 +1412,26 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       if (Number.isFinite(nextTickets)) {
         ticketsLeft = nextTickets
       }
+      if (variant === 'qwen_edit') {
+        await safeUpdateGenerationRecord(auth.admin, usageId, {
+          status: 'error',
+          error_message: 'upstream_parse_error',
+        })
+      }
       return jsonResponse({ error: 'Upstream response is invalid.', usage_id: usageId, ticketsLeft }, 502, corsHeaders)
     }
 
+    const upstreamStatus = normalizeGenerationStatus(
+      upstreamPayload?.status ?? upstreamPayload?.state,
+      upstream.ok ? 'queued' : 'error',
+    )
+    const runpodJobId = extractRunpodJobId(upstreamPayload)
+    const payloadError =
+      upstreamPayload?.error ||
+      upstreamPayload?.output?.error ||
+      upstreamPayload?.result?.error ||
+      upstreamPayload?.output?.output?.error ||
+      upstreamPayload?.result?.output?.error
     const isFailure = !upstream.ok || isFailureStatus(upstreamPayload) || hasOutputError(upstreamPayload)
     if (isFailure) {
       const refundResult = await refundTicket(
@@ -1005,6 +1445,20 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       if (Number.isFinite(nextTickets)) {
         ticketsLeft = nextTickets
       }
+    }
+
+    let firstR2Key: string | null = null
+    if (variant === 'qwen_edit' && isCompletedStatus(upstreamStatus)) {
+      const persisted = await persistImagesToR2(upstreamPayload, env, auth.user.id, usageId)
+      firstR2Key = persisted.firstKey
+    }
+    if (variant === 'qwen_edit') {
+      await safeUpdateGenerationRecord(auth.admin, usageId, {
+        runpod_job_id: runpodJobId ? String(runpodJobId) : undefined,
+        status: isFailure ? 'error' : upstreamStatus,
+        error_message: isFailure ? String(payloadError ?? `upstream_${upstream.status}`) : isCompletedStatus(upstreamStatus) ? null : undefined,
+        ...(firstR2Key ? { r2_key: firstR2Key } : {}),
+      })
     }
 
     upstreamPayload.usage_id = usageId
@@ -1061,6 +1515,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (Number.isFinite(nextTickets)) {
       ticketsLeft = nextTickets
     }
+    if (variant === 'qwen_edit') {
+      await safeUpdateGenerationRecord(auth.admin, usageId, {
+        status: 'error',
+        error_message: error instanceof Error ? error.message : 'network_error',
+      })
+    }
     return jsonResponse(
       {
         error: 'RunPod request failed.',
@@ -1092,9 +1552,26 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (Number.isFinite(nextTickets)) {
       ticketsLeft = nextTickets
     }
+    if (variant === 'qwen_edit') {
+      await safeUpdateGenerationRecord(auth.admin, usageId, {
+        status: 'error',
+        error_message: 'upstream_parse_error',
+      })
+    }
     return jsonResponse({ error: 'Upstream response is invalid.', usage_id: usageId, ticketsLeft }, 502, corsHeaders)
   }
 
+  const upstreamStatus = normalizeGenerationStatus(
+    upstreamPayload?.status ?? upstreamPayload?.state,
+    upstream.ok ? 'queued' : 'error',
+  )
+  const runpodJobId = extractRunpodJobId(upstreamPayload)
+  const payloadError =
+    upstreamPayload?.error ||
+    upstreamPayload?.output?.error ||
+    upstreamPayload?.result?.error ||
+    upstreamPayload?.output?.output?.error ||
+    upstreamPayload?.result?.output?.error
   const isFailure = !upstream.ok || isFailureStatus(upstreamPayload) || hasOutputError(upstreamPayload)
   if (isFailure) {
     const refundResult = await refundTicket(
@@ -1108,6 +1585,20 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     if (Number.isFinite(nextTickets)) {
       ticketsLeft = nextTickets
     }
+  }
+
+  let firstR2Key: string | null = null
+  if (variant === 'qwen_edit' && isCompletedStatus(upstreamStatus)) {
+    const persisted = await persistImagesToR2(upstreamPayload, env, auth.user.id, usageId)
+    firstR2Key = persisted.firstKey
+  }
+  if (variant === 'qwen_edit') {
+    await safeUpdateGenerationRecord(auth.admin, usageId, {
+      runpod_job_id: runpodJobId ? String(runpodJobId) : undefined,
+      status: isFailure ? 'error' : upstreamStatus,
+      error_message: isFailure ? String(payloadError ?? `upstream_${upstream.status}`) : isCompletedStatus(upstreamStatus) ? null : undefined,
+      ...(firstR2Key ? { r2_key: firstR2Key } : {}),
+    })
   }
 
   upstreamPayload.usage_id = usageId

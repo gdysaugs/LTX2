@@ -4,7 +4,6 @@
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
   type CSSProperties,
 } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -22,12 +21,18 @@ type RenderResult = {
   error?: string
 }
 
+type EditSourcePreset = {
+  imageUrl?: string
+  usageId?: string
+}
+
 const API_ENDPOINT = '/api/qwen'
 const IMAGE_TICKET_COST = 1
 const FIXED_STEPS = 4
 const FIXED_CFG = 1
 const FIXED_ANGLE_STRENGTH = 0
 const OAUTH_REDIRECT_URL = getOAuthRedirectUrl()
+const EDIT_SOURCE_STORAGE_KEY = 'image:edit-source'
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -80,6 +85,14 @@ const dataUrlToBlob = (dataUrl: string, fallbackMime: string) => {
   const base64 = match[2] || ''
   return base64ToBlob(base64, mime)
 }
+
+const blobToDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('failed_to_read_blob'))
+    reader.readAsDataURL(blob)
+  })
 
 const extractErrorMessage = (payload: any) =>
   payload?.error ||
@@ -221,6 +234,7 @@ export function Image() {
   const [sourcePreview, setSourcePreview] = useState<string | null>(null)
   const [sourcePayload, setSourcePayload] = useState<string | null>(null)
   const [sourceName, setSourceName] = useState('')
+  const [sourceUsageId, setSourceUsageId] = useState('')
   const [prompt, setPrompt] = useState('')
   const [negativePrompt, setNegativePrompt] = useState('')
   const [width, setWidth] = useState(1024)
@@ -233,6 +247,7 @@ export function Image() {
   const [ticketCount, setTicketCount] = useState<number | null>(null)
   const [ticketStatus, setTicketStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [ticketMessage, setTicketMessage] = useState('')
+  const [editSourcePreset, setEditSourcePreset] = useState<EditSourcePreset | null>(null)
   const [showTicketModal, setShowTicketModal] = useState(false)
   const [errorModalMessage, setErrorModalMessage] = useState<string | null>(null)
   const runIdRef = useRef(0)
@@ -251,6 +266,24 @@ export function Image() {
     [height, isRunning, result?.status, width],
   )
 
+  const applySourceDataUrl = useCallback((dataUrl: string, fileName: string) => {
+    return new Promise<void>((resolve, reject) => {
+      const img = new window.Image()
+      img.onload = () => {
+        const { width: targetWidth, height: targetHeight } = getTargetSize(img.naturalWidth, img.naturalHeight)
+        const paddedDataUrl = buildPaddedDataUrl(img, targetWidth, targetHeight) ?? dataUrl
+        setWidth(targetWidth)
+        setHeight(targetHeight)
+        setSourcePreview(paddedDataUrl)
+        setSourcePayload(toBase64(paddedDataUrl))
+        setSourceName(fileName)
+        resolve()
+      }
+      img.onerror = () => reject(new Error('invalid_image'))
+      img.src = dataUrl
+    })
+  }, [])
+
   useEffect(() => {
     if (!supabase) {
       setAuthReady(true)
@@ -268,6 +301,122 @@ export function Image() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    let raw = ''
+    try {
+      raw = window.sessionStorage.getItem(EDIT_SOURCE_STORAGE_KEY) || ''
+      if (raw) window.sessionStorage.removeItem(EDIT_SOURCE_STORAGE_KEY)
+    } catch {
+      raw = ''
+    }
+    if (!raw) return
+    try {
+      setEditSourcePreset(JSON.parse(raw) as EditSourcePreset)
+    } catch {
+      setEditSourcePreset(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!editSourcePreset) return
+    const usageId = String(editSourcePreset.usageId ?? '').trim()
+    if (usageId) {
+      setSourceUsageId(usageId)
+    }
+    if (!usageId) return
+    if (!accessToken) return
+
+    let cancelled = false
+    const run = async () => {
+      setStatusMessage('履歴画像を読み込み中...')
+      try {
+        const res = await fetch('/api/anima_history', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ usage_id: usageId }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(String(err?.error || 'history_image_fetch_failed'))
+        }
+        const blob = await res.blob()
+        const dataUrl = await blobToDataUrl(blob)
+        if (cancelled) return
+        const sourceLabel = `history-${usageId}.png`
+        await applySourceDataUrl(dataUrl, sourceLabel)
+        if (!cancelled) {
+          setStatusMessage('')
+          setEditSourcePreset(null)
+        }
+      } catch {
+        if (!cancelled) {
+          setStatusMessage('履歴画像の読み込みに失敗しました。履歴ページから編集を押し直してください。')
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [accessToken, applySourceDataUrl, editSourcePreset])
+
+  useEffect(() => {
+    let raw = ''
+    try {
+      raw = window.sessionStorage.getItem(EDIT_SOURCE_STORAGE_KEY) || ''
+      if (raw) window.sessionStorage.removeItem(EDIT_SOURCE_STORAGE_KEY)
+    } catch {
+      raw = ''
+    }
+    if (!raw) return
+
+    let preset: EditSourcePreset | null = null
+    try {
+      preset = JSON.parse(raw) as EditSourcePreset
+    } catch {
+      preset = null
+    }
+    const imageUrl = String(preset?.imageUrl ?? '').trim()
+    const usageId = String(preset?.usageId ?? '').trim()
+    if (!imageUrl || usageId) return
+    setSourceUsageId('')
+
+    let cancelled = false
+    const run = async () => {
+      setStatusMessage('履歴画像を読み込み中...')
+      try {
+        const res = await fetch(imageUrl)
+        if (!res.ok) {
+          throw new Error(`source_fetch_failed_${res.status}`)
+        }
+        const blob = await res.blob()
+        const dataUrl = await blobToDataUrl(blob)
+        if (cancelled) return
+        const usageId = String(preset?.usageId ?? '').trim()
+        const sourceLabel = usageId ? `history-${usageId}.png` : 'history-image.png'
+        await applySourceDataUrl(dataUrl, sourceLabel)
+        if (!cancelled) setStatusMessage('')
+      } catch {
+        if (!cancelled) {
+          setStatusMessage('履歴画像の読み込みに失敗しました。履歴ページから編集を押し直してください。')
+        }
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [applySourceDataUrl])
+
+  useEffect(() => {
+    if (!sourcePayload && !editSourcePreset && !statusMessage) {
+      setStatusMessage('履歴ページの編集ボタンから元画像を選択してください。')
+    }
+  }, [editSourcePreset, sourcePayload, statusMessage])
 
   useEffect(() => {
     if (!supabase) return
@@ -349,6 +498,9 @@ export function Image() {
         worker_mode: 'comfyui',
         mode: 'comfyui',
       }
+      if (sourceUsageId) {
+        input.source_usage_id = sourceUsageId
+      }
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (token) headers.Authorization = `Bearer ${token}`
       const res = await fetch(API_ENDPOINT, {
@@ -378,7 +530,7 @@ export function Image() {
       if (!usageId) throw new Error('usage_id の取得に失敗しました。')
       return { jobId, usageId }
     },
-    [height, negativePrompt, prompt, width],
+    [height, negativePrompt, prompt, sourceUsageId, width],
   )
 
   const pollJob = useCallback(async (jobId: string, usageId: string, runId: number, token?: string) => {
@@ -458,7 +610,11 @@ export function Image() {
   )
 
   const handleGenerate = async () => {
-    if (!sourcePayload || isRunning) return
+    if (isRunning) return
+    if (!sourcePayload) {
+      setStatusMessage('履歴ページの編集ボタンから元画像を選択してください。')
+      return
+    }
     if (!session) {
       setStatusMessage('Googleでログインしてください。')
       return
@@ -502,34 +658,6 @@ export function Image() {
       return
     }
     window.alert('OAuth URLの取得に失敗しました。')
-  }
-
-  const clearImage = () => {
-    setSourcePreview(null)
-    setSourcePayload(null)
-    setSourceName('')
-    setStatusMessage('')
-  }
-
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = String(reader.result || '')
-      const img = new window.Image()
-      img.onload = () => {
-        const { width: targetWidth, height: targetHeight } = getTargetSize(img.naturalWidth, img.naturalHeight)
-        const paddedDataUrl = buildPaddedDataUrl(img, targetWidth, targetHeight) ?? dataUrl
-        setWidth(targetWidth)
-        setHeight(targetHeight)
-        setSourcePreview(paddedDataUrl)
-        setSourcePayload(toBase64(paddedDataUrl))
-        setSourceName(file.name)
-      }
-      img.src = dataUrl
-    }
-    reader.readAsDataURL(file)
   }
 
   const handleDownload = useCallback(async () => {
@@ -593,21 +721,15 @@ export function Image() {
             </div>
 
             <div className="wizard-section">
-              <label className="upload-box">
-                <input type="file" accept="image/*" onChange={handleFileChange} />
-                <div>
-                  <strong>{sourceName || '画像をアップロード'}</strong>
-                  <span>元画像を選択してください。</span>
-                </div>
-              </label>
               {sourcePreview && (
                 <div className="preview-card">
-                  <button type="button" className="preview-card__remove" onClick={clearImage} aria-label="画像を削除">
-                    x
-                  </button>
                   <img src={sourcePreview} alt="元画像プレビュー" />
                 </div>
               )}
+              {!sourcePreview && (
+                <div className="source-placeholder">履歴ページの編集ボタンから元画像を選択してください。</div>
+              )}
+              {sourceName && <p className="wizard-note">元画像: {sourceName}</p>}
             </div>
 
             <label className="wizard-field">
@@ -667,7 +789,7 @@ export function Image() {
               ) : displayImage ? (
                 <img src={displayImage} alt="生成結果" />
               ) : (
-                <div className="stage-placeholder">元画像とプロンプトを入力してください。</div>
+                <div className="stage-placeholder">履歴から元画像を選択し、プロンプトを入力してください。</div>
               )}
             </div>
           </div>
