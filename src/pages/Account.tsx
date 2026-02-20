@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useNavigate } from 'react-router-dom'
 import { TopNav } from '../components/TopNav'
@@ -52,8 +52,6 @@ export function Account() {
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [deletingUsageId, setDeletingUsageId] = useState<string | null>(null)
-  const [historyBlobUrls, setHistoryBlobUrls] = useState<Record<string, string>>({})
-  const historyBlobUrlsRef = useRef<Record<string, string>>({})
   const navigate = useNavigate()
 
   const accessToken = session?.access_token ?? ''
@@ -130,76 +128,6 @@ export function Account() {
     void fetchHistory(accessToken)
   }, [accessToken, fetchHistory])
 
-  useEffect(() => {
-    if (!accessToken) {
-      for (const url of Object.values(historyBlobUrlsRef.current)) {
-        URL.revokeObjectURL(url)
-      }
-      historyBlobUrlsRef.current = {}
-      setHistoryBlobUrls({})
-      return
-    }
-
-    const activeUsageIds = new Set(items.map((item) => item.usage_id))
-    const nextBlobMap = { ...historyBlobUrlsRef.current }
-    let shouldSyncBlobMap = false
-    for (const [usageId, objectUrl] of Object.entries(nextBlobMap)) {
-      if (activeUsageIds.has(usageId)) continue
-      URL.revokeObjectURL(objectUrl)
-      delete nextBlobMap[usageId]
-      shouldSyncBlobMap = true
-    }
-    if (shouldSyncBlobMap) {
-      historyBlobUrlsRef.current = nextBlobMap
-      setHistoryBlobUrls({ ...nextBlobMap })
-    }
-
-    let cancelled = false
-    const run = async () => {
-      for (const item of items) {
-        if (cancelled) return
-        if (!item.image_url) continue
-        if (historyBlobUrlsRef.current[item.usage_id]) continue
-
-        try {
-          const res = await fetch('/api/anima_history', {
-            method: 'POST',
-            headers: {
-              Authorization: 'Bearer ' + accessToken,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ usage_id: item.usage_id }),
-          })
-          if (!res.ok) continue
-          const blob = await res.blob()
-          const objectUrl = URL.createObjectURL(blob)
-          if (cancelled) {
-            URL.revokeObjectURL(objectUrl)
-            return
-          }
-          historyBlobUrlsRef.current[item.usage_id] = objectUrl
-          setHistoryBlobUrls((prev) => ({ ...prev, [item.usage_id]: objectUrl }))
-        } catch {
-          // keep placeholder on fetch error
-        }
-      }
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [accessToken, items])
-
-  useEffect(
-    () => () => {
-      for (const url of Object.values(historyBlobUrlsRef.current)) {
-        URL.revokeObjectURL(url)
-      }
-      historyBlobUrlsRef.current = {}
-    },
-    [],
-  )
-
   const handleSignOut = useCallback(async () => {
     if (!supabase) return
     await supabase.auth.signOut({ scope: 'local' })
@@ -273,18 +201,6 @@ export function Account() {
           setErrorMessage(data?.error || '削除に失敗しました。')
           return
         }
-
-        const objectUrl = historyBlobUrlsRef.current[usageId]
-        if (objectUrl) {
-          URL.revokeObjectURL(objectUrl)
-          delete historyBlobUrlsRef.current[usageId]
-          setHistoryBlobUrls((prev) => {
-            const next = { ...prev }
-            delete next[usageId]
-            return next
-          })
-        }
-
         setItems((prev) => prev.filter((item) => item.usage_id !== usageId))
       } catch {
         setErrorMessage('削除に失敗しました。')
@@ -348,10 +264,8 @@ export function Account() {
         {items.map((item) => (
           <article className='account-history-card' key={item.usage_id}>
             <div className='account-history-image-wrap'>
-              {historyBlobUrls[item.usage_id] ? (
-                <img src={historyBlobUrls[item.usage_id]} alt='生成画像' loading='lazy' />
-              ) : item.image_url ? (
-                <div className='account-history-image-placeholder'>読み込み中...</div>
+              {item.image_url ? (
+                <img src={item.image_url} alt='生成画像' loading='lazy' />
               ) : (
                 <div className='account-history-image-placeholder'>画像なし</div>
               )}
@@ -396,7 +310,7 @@ export function Account() {
         ))}
       </div>
     )
-  }, [deletingUsageId, errorMessage, handleDelete, handleEdit, handleRegenerate, handleVideoize, hasHistory, historyBlobUrls, items, loading])
+  }, [deletingUsageId, errorMessage, handleDelete, handleEdit, handleRegenerate, handleVideoize, hasHistory, items, loading])
 
   if (!authReady) {
     return (
