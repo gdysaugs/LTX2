@@ -131,11 +131,7 @@
   padding: 9px 10px;
   font-size: 0.78rem;
   min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  line-height: 1.25;
-  height: auto;
-  min-height: 36px;
+  white-space: nowrap;
 }
 
 .account-action-button--danger {
