@@ -19,6 +19,10 @@ const API_ENDPOINT = '/api/anima'
 const IMAGE_TICKET_COST = 1
 
 // Recommended defaults.
+const STEPS_MIN = 20
+const STEPS_MAX = 45
+const CFG_MIN = 1
+const CFG_MAX = 5
 const FIXED_STEPS = 45
 const FIXED_CFG = 4.5
 const FIXED_WIDTH = 1024
@@ -78,6 +82,7 @@ const SCHEDULER_GUIDE: ParameterGuideItem[] = [
 const OAUTH_REDIRECT_URL = getOAuthRedirectUrl()
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
@@ -350,13 +355,15 @@ export function Video() {
 
   const submitImage = useCallback(
     async (token: string) => {
+      const safeSteps = clamp(Math.floor(Number(steps || FIXED_STEPS)), STEPS_MIN, STEPS_MAX)
+      const safeCfg = clamp(Number(cfg || FIXED_CFG), CFG_MIN, CFG_MAX)
       const input: Record<string, unknown> = {
         prompt,
         negative_prompt: negativePrompt,
         width: FIXED_WIDTH,
         height: FIXED_HEIGHT,
-        steps,
-        cfg,
+        steps: safeSteps,
+        cfg: safeCfg,
         seed,
         randomize_seed: randomizeSeed,
         sampler_name: samplerName,
@@ -602,26 +609,28 @@ export function Video() {
               <p className='wizard-eyebrow'>詳細パラメータ</p>
               <div className='wizard-params-grid'>
                 <label className='wizard-field'>
-                  <span>Steps (1-60)</span>
+                  <span>Steps (20-45)</span>
                   <input
                     type='number'
-                    min={1}
-                    max={60}
+                    min={STEPS_MIN}
+                    max={STEPS_MAX}
                     step={1}
                     value={steps}
-                    onChange={(e) => setSteps(Math.floor(Number(e.target.value || 1)))}
+                    onChange={(e) =>
+                      setSteps(clamp(Math.floor(Number(e.target.value || FIXED_STEPS)), STEPS_MIN, STEPS_MAX))
+                    }
                   />
                 </label>
 
                 <label className='wizard-field'>
-                  <span>CFG (0-10)</span>
+                  <span>CFG (1-5)</span>
                   <input
                     type='number'
-                    min={0}
-                    max={10}
+                    min={CFG_MIN}
+                    max={CFG_MAX}
                     step={0.1}
                     value={cfg}
-                    onChange={(e) => setCfg(Number(e.target.value || 0))}
+                    onChange={(e) => setCfg(clamp(Number(e.target.value || FIXED_CFG), CFG_MIN, CFG_MAX))}
                   />
                 </label>
 
@@ -676,7 +685,7 @@ export function Video() {
                 <p className='wizard-parameter-guide__title'>パラメータの使い方</p>
                 <p>
                   <strong>Steps</strong>: 反復回数。高いほど描写は安定しやすいですが遅くなります。目安は
-                  <code>30-50</code>。
+                  <code>30-45</code>。
                 </p>
                 <p>
                   <strong>CFG</strong>: プロンプト追従の強さ。高すぎると破綻しやすく、低すぎると指示が弱くなります。目安は
