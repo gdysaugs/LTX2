@@ -514,6 +514,96 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.wizard-parameter-guide {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--camera-outline);
+  border-radius: 16px;
+  background: var(--camera-panel-strong);
+}
+
+.wizard-parameter-guide__title {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--camera-accent-strong);
+  font-weight: 700;
+}
+
+.wizard-parameter-guide p {
+  margin: 0;
+  font-size: 0.83rem;
+  line-height: 1.55;
+  color: var(--camera-muted);
+}
+
+.wizard-parameter-guide strong {
+  color: var(--camera-ink);
+  font-weight: 700;
+}
+
+.wizard-parameter-guide code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.78rem;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--camera-ink);
+}
+
+.wizard-parameter-catalog {
+  border: 1px solid var(--camera-outline);
+  border-radius: 16px;
+  background: var(--camera-panel);
+  padding: 10px 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.wizard-parameter-catalog summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--camera-ink);
+  list-style: none;
+}
+
+.wizard-parameter-catalog summary::-webkit-details-marker {
+  display: none;
+}
+
+.wizard-parameter-catalog__section {
+  display: grid;
+  gap: 6px;
+}
+
+.wizard-parameter-catalog__title {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--camera-accent-strong);
+  font-weight: 700;
+}
+
+.wizard-parameter-catalog__section p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--camera-muted);
+}
+
+.wizard-parameter-catalog__section code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.78rem;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--camera-ink);
+}
+
 @media (max-width: 700px) {
   .wizard-params-grid {
     grid-template-columns: 1fr;
