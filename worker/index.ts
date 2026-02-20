@@ -1,6 +1,12 @@
 import { onRequestGet as qwenGet, onRequestPost as qwenPost, onRequestOptions as qwenOptions } from '../functions/api/qwen'
 import { onRequestGet as wanGet, onRequestPost as wanPost, onRequestOptions as wanOptions } from '../functions/api/wan'
 import { onRequestGet as animaGet, onRequestPost as animaPost, onRequestOptions as animaOptions } from '../functions/api/anima'
+import {
+  onRequestGet as animaHistoryGet,
+  onRequestPost as animaHistoryPost,
+  onRequestDelete as animaHistoryDelete,
+  onRequestOptions as animaHistoryOptions,
+} from '../functions/api/anima_history'
 import { onRequestGet as ticketsGet, onRequestOptions as ticketsOptions } from '../functions/api/tickets'
 import { onRequestGet as gptsovitsGet, onRequestPost as gptsovitsPost, onRequestOptions as gptsovitsOptions } from '../functions/api/gptsovits'
 import { onRequestGet as wav2lipGet, onRequestPost as wav2lipPost, onRequestDelete as wav2lipDelete, onRequestOptions as wav2lipOptions } from '../functions/api/wav2lip'
@@ -18,6 +24,7 @@ type Env = {
   COMFY_ORG_API_KEY?: string
   RUNPOD_WORKER_MODE?: string
   R2_ACCOUNT_ID?: string
+  R2_ANIMA_BUCKET?: string
   R2_BUCKET?: string
   R2_ACCESS_KEY_ID?: string
   R2_SECRET_ACCESS_KEY?: string
@@ -38,6 +45,7 @@ type PagesArgs = {
 
 const notFound = () => new Response('Not Found', { status: 404 })
 const methodNotAllowed = () => new Response('Method Not Allowed', { status: 405 })
+const matchesApiPath = (path: string, base: string) => path === base || path.startsWith(`${base}/`)
 
 export default {
   async fetch(request: Request, env: Env) {
@@ -46,47 +54,55 @@ export default {
     const method = request.method.toUpperCase()
     const args: PagesArgs = { request, env }
 
-    if (path.startsWith('/api/qwen')) {
+    if (matchesApiPath(path, '/api/qwen')) {
       if (method === 'OPTIONS') return qwenOptions(args as any)
       if (method === 'GET') return qwenGet(args as any)
       if (method === 'POST') return qwenPost(args as any)
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/wan')) {
+    if (matchesApiPath(path, '/api/wan')) {
       if (method === 'OPTIONS') return wanOptions(args as any)
       if (method === 'GET') return wanGet(args as any)
       if (method === 'POST') return wanPost(args as any)
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/anima')) {
+    if (matchesApiPath(path, '/api/anima_history')) {
+      if (method === 'OPTIONS') return animaHistoryOptions(args as any)
+      if (method === 'GET') return animaHistoryGet(args as any)
+      if (method === 'POST') return animaHistoryPost(args as any)
+      if (method === 'DELETE') return animaHistoryDelete(args as any)
+      return methodNotAllowed()
+    }
+
+    if (matchesApiPath(path, '/api/anima')) {
       if (method === 'OPTIONS') return animaOptions(args as any)
       if (method === 'GET') return animaGet(args as any)
       if (method === 'POST') return animaPost(args as any)
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/tickets')) {
+    if (matchesApiPath(path, '/api/tickets')) {
       if (method === 'OPTIONS') return ticketsOptions(args as any)
       if (method === 'GET') return ticketsGet(args as any)
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/r2_presign')) {
+    if (matchesApiPath(path, '/api/r2_presign')) {
       if (method === 'OPTIONS') return r2PresignOptions(args as any)
       if (method === 'POST') return r2PresignPost(args as any)
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/gptsovits')) {
+    if (matchesApiPath(path, '/api/gptsovits')) {
       if (method === 'OPTIONS') return gptsovitsOptions(args as any)
       if (method === 'GET') return gptsovitsGet(args as any)
       if (method === 'POST') return gptsovitsPost(args as any)
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/wav2lip')) {
+    if (matchesApiPath(path, '/api/wav2lip')) {
       if (method === 'OPTIONS') return wav2lipOptions(args as any)
       if (method === 'GET') return wav2lipGet(args as any)
       if (method === 'POST') return wav2lipPost(args as any)
@@ -94,13 +110,13 @@ export default {
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/stripe/checkout')) {
+    if (matchesApiPath(path, '/api/stripe/checkout')) {
       if (method === 'OPTIONS') return stripeCheckoutOptions(args as any)
       if (method === 'POST') return stripeCheckoutPost(args as any)
       return methodNotAllowed()
     }
 
-    if (path.startsWith('/api/stripe/webhook')) {
+    if (matchesApiPath(path, '/api/stripe/webhook')) {
       if (method === 'OPTIONS') return stripeWebhookOptions(args as any)
       if (method === 'POST') return stripeWebhookPost(args as any)
       return methodNotAllowed()
