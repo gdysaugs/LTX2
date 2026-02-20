@@ -26,8 +26,10 @@ const jsonResponse = (body: unknown, status = 200, headers: HeadersInit = {}) =>
     headers: { ...headers, 'Content-Type': 'application/json' },
   })
 
+const DEFAULT_WAN_ENDPOINT_URL = 'https://api.runpod.ai/v2/tjikhtb6t70noy'
+
 const resolveEndpoint = (env: Env) =>
-  (env.RUNPOD_WAN_ENDPOINT_URL ?? env.RUNPOD_ENDPOINT_URL)?.replace(/\/$/, '')
+  (env.RUNPOD_WAN_ENDPOINT_URL ?? env.RUNPOD_ENDPOINT_URL ?? DEFAULT_WAN_ENDPOINT_URL)?.replace(/\/$/, '')
 
 type NodeMapEntry = {
   id: string

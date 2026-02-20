@@ -31,6 +31,7 @@ type HistoryItem = {
 const OAUTH_REDIRECT_URL = getOAuthRedirectUrl()
 const REGENERATE_STORAGE_KEY = 'anima:regenerate-preset'
 const EDIT_SOURCE_STORAGE_KEY = 'image:edit-source'
+const I2V_SOURCE_STORAGE_KEY = 'wan:i2v-source'
 
 const formatDate = (value: string) => {
   const date = new Date(value)
@@ -316,6 +317,27 @@ export function Account() {
     [navigate],
   )
 
+  const handleVideoize = useCallback(
+    (item: HistoryItem) => {
+      if (!item.image_url) {
+        setErrorMessage('動画化用の画像が見つかりません。')
+        return
+      }
+      try {
+        window.sessionStorage.setItem(
+          I2V_SOURCE_STORAGE_KEY,
+          JSON.stringify({
+            usageId: item.usage_id,
+          }),
+        )
+      } catch {
+        // no-op
+      }
+      navigate('/video')
+    },
+    [navigate],
+  )
+
   const historyBody = useMemo(() => {
     if (loading) return <div className='account-empty'>履歴を読み込み中...</div>
     if (errorMessage) return <div className='account-empty account-empty--error'>{errorMessage}</div>
@@ -349,6 +371,14 @@ export function Account() {
                 >
                   編集
                 </button>
+                <button
+                  className='ghost-button account-action-button'
+                  type='button'
+                  onClick={() => handleVideoize(item)}
+                  disabled={!item.image_url}
+                >
+                  動画化
+                </button>
                 <button className='ghost-button account-action-button' type='button' onClick={() => handleRegenerate(item)}>
                   i2i
                 </button>
@@ -366,7 +396,7 @@ export function Account() {
         ))}
       </div>
     )
-  }, [deletingUsageId, errorMessage, handleDelete, handleEdit, handleRegenerate, hasHistory, historyBlobUrls, items, loading])
+  }, [deletingUsageId, errorMessage, handleDelete, handleEdit, handleRegenerate, handleVideoize, hasHistory, historyBlobUrls, items, loading])
 
   if (!authReady) {
     return (
