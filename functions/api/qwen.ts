@@ -515,7 +515,7 @@ const safeUpdateGenerationRecord = async (
   }
 }
 
-const resolveSourcePrompt = async (
+const resolveSourceGeneration = async (
   admin: ReturnType<typeof createClient>,
   user: User,
   sourceUsageId: string,
@@ -525,13 +525,26 @@ const resolveSourcePrompt = async (
   try {
     const { data, error } = await admin
       .from('anima_generations')
-      .select('prompt')
+      .select(
+        'prompt, negative_prompt, width, height, steps, cfg, seed, randomize_seed, sampler_name, scheduler, denoise',
+      )
       .eq('usage_id', usageId)
       .eq('user_id', user.id)
       .maybeSingle()
     if (error || !data) return null
-    const prompt = typeof data.prompt === 'string' ? data.prompt.trim() : ''
-    return prompt || null
+    return {
+      prompt: typeof data.prompt === 'string' ? data.prompt : '',
+      negative_prompt: typeof data.negative_prompt === 'string' ? data.negative_prompt : '',
+      width: Number(data.width),
+      height: Number(data.height),
+      steps: Number(data.steps),
+      cfg: Number(data.cfg),
+      seed: Number(data.seed),
+      randomize_seed: Boolean(data.randomize_seed),
+      sampler_name: typeof data.sampler_name === 'string' ? data.sampler_name : '',
+      scheduler: typeof data.scheduler === 'string' ? data.scheduler : '',
+      denoise: Number(data.denoise),
+    } as Partial<GenerationSummary>
   } catch {
     return null
   }
@@ -1213,20 +1226,38 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
   let generationSummary: GenerationSummary | null = null
   if (variant === 'qwen_edit') {
-    const inheritedPrompt = await resolveSourcePrompt(auth.admin, auth.user, sourceUsageId)
+    const sourceGeneration = await resolveSourceGeneration(auth.admin, auth.user, sourceUsageId)
     const seedValue = Math.floor(Number(input?.seed ?? 0))
+    const fallbackCfg = Number.isFinite(guidanceScale) ? Math.max(1, Math.min(5, guidanceScale)) : 1
+    const sourcePrompt = typeof sourceGeneration?.prompt === 'string' ? sourceGeneration.prompt.trim() : ''
+    const sourceNegative = typeof sourceGeneration?.negative_prompt === 'string' ? sourceGeneration.negative_prompt : ''
+    const sourceSampler = typeof sourceGeneration?.sampler_name === 'string' ? sourceGeneration.sampler_name.trim() : ''
+    const sourceScheduler = typeof sourceGeneration?.scheduler === 'string' ? sourceGeneration.scheduler.trim() : ''
+    const sourceWidth = Number(sourceGeneration?.width)
+    const sourceHeight = Number(sourceGeneration?.height)
+    const sourceSteps = Number(sourceGeneration?.steps)
+    const sourceCfg = Number(sourceGeneration?.cfg)
+    const sourceSeed = Number(sourceGeneration?.seed)
+    const sourceDenoise = Number(sourceGeneration?.denoise)
     generationSummary = {
-      prompt: inheritedPrompt ?? prompt,
-      negative_prompt: negativePrompt,
-      width,
-      height,
-      steps,
-      cfg: guidanceScale,
-      seed: Number.isFinite(seedValue) ? Math.max(0, Math.min(2147483647, seedValue)) : 0,
-      randomize_seed: Boolean(input?.randomize_seed ?? true),
-      sampler_name: 'qwen_edit',
-      scheduler: 'qwen_edit',
-      denoise: 1,
+      prompt: sourcePrompt || prompt,
+      negative_prompt: sourceNegative || negativePrompt,
+      width: Number.isFinite(sourceWidth) ? sourceWidth : width,
+      height: Number.isFinite(sourceHeight) ? sourceHeight : height,
+      steps: Number.isFinite(sourceSteps) && sourceSteps > 0 ? Math.floor(sourceSteps) : Math.max(20, steps),
+      cfg: Number.isFinite(sourceCfg) ? sourceCfg : fallbackCfg,
+      seed: Number.isFinite(sourceSeed)
+        ? Math.max(0, Math.min(2147483647, Math.floor(sourceSeed)))
+        : Number.isFinite(seedValue)
+        ? Math.max(0, Math.min(2147483647, seedValue))
+        : 0,
+      randomize_seed:
+        typeof sourceGeneration?.randomize_seed === 'boolean'
+          ? sourceGeneration.randomize_seed
+          : Boolean(input?.randomize_seed ?? true),
+      sampler_name: sourceSampler || 'er_sde',
+      scheduler: sourceScheduler || 'simple',
+      denoise: Number.isFinite(sourceDenoise) ? Math.max(0, Math.min(1, sourceDenoise)) : 1,
     }
   }
 
